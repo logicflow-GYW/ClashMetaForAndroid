@@ -289,6 +289,7 @@
     <string name="cf_optimizer_password">上传密码</string>
     <string name="cf_optimizer_password_set">已设置</string>
     <string name="cf_optimizer_password_unset">未设置</string>
+    <string name="cf_optimizer_password_save_failed">密码保存失败</string>
     <string name="cf_optimizer_subscription_profile">绑定的订阅</string>
     <string name="cf_optimizer_subscription_profile_none">未绑定</string>
     <string name="cf_optimizer_custom_entries">自定义静态行</string>

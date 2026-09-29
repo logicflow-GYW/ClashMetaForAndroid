@@ -380,6 +380,7 @@
     <string name="cf_optimizer_password">Upload password</string>
     <string name="cf_optimizer_password_set">Set</string>
     <string name="cf_optimizer_password_unset">Not set</string>
+    <string name="cf_optimizer_password_save_failed">Failed to save password</string>
     <string name="cf_optimizer_subscription_profile">Bound subscription</string>
     <string name="cf_optimizer_subscription_profile_none">None</string>
     <string name="cf_optimizer_custom_entries">Custom static entries</string>

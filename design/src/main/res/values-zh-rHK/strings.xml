@@ -270,6 +270,7 @@
     <string name="cf_optimizer_password">上傳密碼</string>
     <string name="cf_optimizer_password_set">已設定</string>
     <string name="cf_optimizer_password_unset">未設定</string>
+    <string name="cf_optimizer_password_save_failed">密碼儲存失敗</string>
     <string name="cf_optimizer_subscription_profile">綁定的訂閱</string>
     <string name="cf_optimizer_subscription_profile_none">未綁定</string>
     <string name="cf_optimizer_custom_entries">自訂靜態行</string>
