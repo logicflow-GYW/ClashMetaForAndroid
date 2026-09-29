@@ -8,6 +8,13 @@ on:
 permissions:
   contents: write
 
+# 同一分支的发布只允许一个在跑：连推两次会产生两个 run，各自删/建同一个 tag，
+# 并发时后者的 ref 操作会被前者的删除撞上；更糟的是慢的旧 run 会把旧产物
+# 覆盖到新 release 上（tag 被移回旧提交）。排队而非取消：最后发布的一定是最新提交。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   BuildPreRelease:
     runs-on: ubuntu-latest
@@ -32,6 +39,11 @@ jobs:
         with:
           go-download-base-url: 'https://github.com/MetaCubeX/go/releases/download/build'
           go-version: '1.26'
+          # 关掉 setup-go 自带的模块缓存：它在仓库根找 go.mod（本仓库的 go.mod 在
+          # core/src/*/golang/ 下），每次 restore 都失败并报 warning，post 步骤也存不下
+          # （"Primary key was not generated"）。Go 缓存由下面那条 actions/cache 统一负责，
+          # 那条是真在工作的（restore 命中 Linux-go-<hash>）。
+          cache: false
 
       - name: Apply Patches
         run: |
@@ -71,22 +83,42 @@ jobs:
         if: success()
         run: ./gradlew --no-daemon app:assembleAlphaRelease
 
-      # Delete old Prerelease-alpha
-      - uses: dev-drprasad/delete-tag-and-release@v1.1
+      # 把 Prerelease-alpha 指到本次提交：GitHub 的 tag 不能移动，只能删了重建。
+      # 全部操作幂等（对象不存在 = 成功），重建 ref 带退避重试 ——
+      # 2026-09-29 22:40 实测过一次 POST /git/refs 瞬时返回
+      #   403 "Resource not accessible by integration"
+      # （发生在本 run 刚删完同一个 ref 的 0.8 秒后；同配置的相邻三次 run 全部成功），
+      # 属瞬时故障而非权限问题：token 的 contents: write 同一 run 内刚成功删过 ref。
+      - name: Reset prerelease tag
         if: github.ref == 'refs/heads/main' && success()
-        continue-on-error: true
-        with:
-          tag_name: Prerelease-alpha
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          delete_release: true
-
-      - name: Tag Repo
-        uses: richardsimko/update-tag@v3
-        if: github.ref == 'refs/heads/main' && success()
-        with:
-          tag_name: Prerelease-alpha
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG=Prerelease-alpha
+
+          # 旧 release + tag 一并清掉（不存在就跳过）
+          gh release delete "$TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" >/dev/null 2>&1 || true
+
+          for i in 1 2 3 4 5; do
+            if gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" \
+                 -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" >/dev/null 2>&1; then
+              echo "$TAG -> $GITHUB_SHA"
+              exit 0
+            fi
+            # 已存在且正好指向本次提交（上一次其实建成了 / 并发 run 抢先建好）= 成功
+            if [ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" \
+                     --jq '.object.sha' 2>/dev/null || true)" = "$GITHUB_SHA" ]; then
+              echo "$TAG already points at $GITHUB_SHA"
+              exit 0
+            fi
+            echo "::warning::create tag $TAG failed (attempt $i/5), retrying in $((i * 10))s"
+            sleep $((i * 10))
+          done
+
+          echo "::error::failed to create tag $TAG after 5 attempts"
+          exit 1
 
       - name: Upload Alpha
         uses: softprops/action-gh-release@v3
@@ -96,8 +128,3 @@ jobs:
           files: app/build/outputs/apk/alpha/release/*
           prerelease: true
           generate_release_notes: true
-
-      - name: Release Changelog Builder
-        uses: mikepenz/release-changelog-builder-action@v6
-        if: github.ref == 'refs/heads/main' && success()
-        continue-on-error: true

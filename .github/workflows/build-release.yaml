@@ -33,6 +33,10 @@ jobs:
         with:
           go-download-base-url: 'https://github.com/MetaCubeX/go/releases/download/build'
           go-version: '1.26'
+          # 关掉 setup-go 自带的模块缓存：它在仓库根找 go.mod（本仓库的 go.mod 在
+          # core/src/*/golang/ 下），每次 restore 都失败并报 warning。Go 缓存由下面那条
+          # actions/cache 统一负责，那条是真在工作的（restore 命中 Linux-go-<hash>）。
+          cache: false
 
       - name: Apply Patches
         run: |
