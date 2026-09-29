@@ -1,5 +1,7 @@
 package com.github.kr328.clash.service.cfoptimizer
 
+import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerTuning
+
 /**
  * CF 候选优选 — 纯逻辑数据模型（无 Android 依赖、无 IO、无网络）。
  *
@@ -33,8 +35,18 @@ data class OptimizerLimits(
      * 主集成会话的现有调用，以默认关闭的可选字段落地，并已在任务回报中声明此偏差。
      */
     val maxPerRegion: Int = 0,
-    /** 评分权重；默认 0.6 / 0.4 与原脚本一致（用户可调，见 CfOptimizerTuning）。 */
+    /**
+     * 评分权重；默认 0.6 / 0.4 与原脚本一致（用户可调，见 CfOptimizerTuning）。
+     */
     val weights: ScoreWeights = ScoreWeights(),
+    /**
+     * 带宽分量"满分"的参考值（Mbps）—— 原脚本 `SCORE_MAX_BPS = 150`。
+     *
+     * 默认取 [CfOptimizerTuning.SCORE_BW_REF_MBPS_DEFAULT]（50）：150 在 10–30 Mbps 的移动链路上
+     * 让带宽分量退化成常数（10 Mbps 与 30 Mbps 只差 5 分），排序实际上只剩 TTFB 一项 ——
+     * 真机实测的后果是"握手快但下载慢"的节点当选。理由与调法写在那个常量上，这里只承载数值。
+     */
+    val bwRefMbps: Double = CfOptimizerTuning.SCORE_BW_REF_MBPS_DEFAULT,
 )
 
 /**

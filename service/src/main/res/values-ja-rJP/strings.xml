@@ -20,6 +20,7 @@
     <string name="cf_optimizer_service">CF オプティマイザー</string>
     <string name="cf_optimizer_result_success">ノードを %1$d 個最適化し、アップロードしました</string>
     <string name="cf_optimizer_stage_sources">ソース一覧を取得中</string>
+    <string name="cf_optimizer_stage_trace">リージョンを解決中 %1$d/%2$d</string>
     <string name="cf_optimizer_stage_probe">プローブ中 %1$d/%2$d</string>
     <string name="cf_optimizer_stage_rank">スコア計算中</string>
     <string name="cf_optimizer_stage_download">速度テスト %1$d/%2$d</string>

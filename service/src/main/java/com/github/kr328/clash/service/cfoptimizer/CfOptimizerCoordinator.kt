@@ -10,6 +10,7 @@ import com.github.kr328.clash.service.cfoptimizer.net.PhysicalNetwork
 import com.github.kr328.clash.service.cfoptimizer.probe.CfProbe
 import com.github.kr328.clash.service.cfoptimizer.probe.CfProbeConfig
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsStore
+import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerTuning
 import com.github.kr328.clash.service.cfoptimizer.settings.KeystoreCfOptimizerSecretStore
 import com.github.kr328.clash.service.cfoptimizer.source.CfCandidateSource
 import com.github.kr328.clash.service.cfoptimizer.worker.CfWorkerClient
@@ -104,6 +105,7 @@ class CfOptimizerCoordinator(private val context: Context) {
             tcpConcurrency = settingsStore.tcpConcurrency,
             tcpTimeoutMs = settingsStore.tcpTimeoutMs,
             probeConcurrency = settingsStore.probeConcurrency,
+            traceConcurrency = settingsStore.traceConcurrency,
             ttfbSamples = settingsStore.ttfbSamples,
             downloadPoolLimit = settingsStore.downloadPoolLimit,
             downloadConcurrency = settingsStore.downloadConcurrency,
@@ -160,7 +162,7 @@ class CfOptimizerCoordinator(private val context: Context) {
 
         val sources = CfCandidateSource.BUILTIN_SOURCE_URLS +
                 (discovered.ifEmpty { state.cachedSourceUrls() }).shuffled()
-                    .take(sourcesPerRun.coerceIn(1, 12))
+                    .take(sourcesPerRun.coerceIn(1, CfOptimizerTuning.SOURCES_PER_RUN_MAX))
 
         val candidates = try {
             CfCandidateSource.fetchFrom(
@@ -229,25 +231,40 @@ class CfOptimizerCoordinator(private val context: Context) {
             return Result(0, 0, false, "no_reachable_candidates", false, null)
         }
 
-        // 2. 物理网络探测（绑定 Network 的 socket，绕开本应用 VPN）。进度实时上报。
-        val metrics = probe.measure(allCandidates) { done, total ->
-            state.saveRunState(STAGE_PROBE, done, total)
-            onProgress(STAGE_PROBE, done, total)
+        // 2. 地区解析（trace）—— **跑在 TTFB 采样之前**（原版顺序：`EXCLUDE_COUNTRIES` 过滤就写在
+        //    trace 循环里）。trace 是单次 GET（几百字节、无采样），单价远低于 3 次 TTFB 采样，
+        //    先用它把黑名单地区挡在昂贵采样之外。顺序反了的代价是实测出来的：一轮 445 次 TTFB
+        //    探测里 229 次（51%）打在随后就被丢弃的地区上，probe 段 163s 占整轮 232s 的 70%。
+        state.saveRunState(STAGE_TRACE, 0, allCandidates.size)
+        onProgress(STAGE_TRACE, 0, allCandidates.size)
+
+        val regions = probe.resolveRegions(allCandidates) { done, total ->
+            state.saveRunState(STAGE_TRACE, done, total)
+            onProgress(STAGE_TRACE, done, total)
         }
 
-        markStage(STAGE_PROBE)
+        markStage(STAGE_TRACE)
 
-        // 2.5 国家过滤（原版 EXCLUDE_COUNTRIES / ONLY_COUNTRIES，应用在 trace 阶段）：
-        //     黑名单（trace loc 命中）不进评分/上传；白名单启用时只保留命中国家。
+        // 2.3 国家过滤（原版 EXCLUDE_COUNTRIES / ONLY_COUNTRIES）：黑名单（trace loc 命中）
+        //     不进 TTFB 采样/评分/上传；白名单启用时只保留命中国家。
         //     trace 失败（region 缺失）的候选保留——未知 ≠ 封锁，不因 trace 抖动把整轮清空。
         val probed = allCandidates.filter { cand ->
-            val region = metrics[cand]?.region?.uppercase() ?: return@filter true
+            val region = regions[cand]?.uppercase() ?: return@filter true
 
             if (region in excludeCountries) return@filter false
             if (onlyCountries.isNotEmpty() && region !in onlyCountries) return@filter false
 
             true
         }
+
+        // 2.5 TTFB 采样（绑定 Network 的 socket，绕开本应用 VPN）。进度实时上报。
+        //     只作用于**通过地区过滤**的候选 —— 这是探测预算真正该花的地方。
+        val metrics = probe.measure(probed, regions) { done, total ->
+            state.saveRunState(STAGE_PROBE, done, total)
+            onProgress(STAGE_PROBE, done, total)
+        }
+
+        markStage(STAGE_PROBE)
 
         // 2.7 下载测速（默认开）：评分公式里带宽占 40%，此前该分量恒为 0 —— 等于只按
         //     延迟选节点。只测 TTFB 最优的窄池（原脚本 TTFB_POOL_LIMIT 语义），
@@ -295,8 +312,21 @@ class CfOptimizerCoordinator(private val context: Context) {
             minScore = settingsStore.effectiveMinScore,
             maxPerRegion = maxPerRegion,
             weights = settingsStore.scoreWeights,
+            bwRefMbps = settingsStore.scoreBwRefMbps,
+            minDownloadMbps = settingsStore.effectiveMinDownloadMbps,
         )
-        var ranked = CfOptimizerEngine.rank(probed, scoredMetrics, limits)
+
+        // 3.1 最终名单只从"测速成功"的集合里挑（对齐原版 `final = select(bw_results)` 的语义）：
+        //     没测到带宽的节点与测到 0.3 Mbps 的节点在旧口径下几乎同分（带宽分量都趋近 0），
+        //     等于拿"不存在的指标"参与排名。真机实测后果：一条 0.307 Mbps 的节点拿 48.2 分入选。
+        //     下载测速关掉时不做这个收窄 —— 那时全池都没有带宽读数，收窄会把名单清空。
+        val rankPool = if (downloadTestEnabled && downloads.isNotEmpty()) {
+            probed.filter { it in downloads }
+        } else {
+            probed
+        }
+
+        var ranked = CfOptimizerEngine.rank(rankPool, scoredMetrics, limits)
 
         // 3.5 CIDR 前缀去重（原版 cidr_seen 语义）：同一前缀只保留最高分，
         //     让 Worker 列表分散在不同网段；去重后不足质量门则不上传。
@@ -469,6 +499,9 @@ class CfOptimizerCoordinator(private val context: Context) {
 
         /** 漏斗第一段：TCP 连通预筛（只 connect，死 IP 在这里被便宜地淘汰）。 */
         const val STAGE_TCP: String = "tcp"
+
+        /** 漏斗第二段：地区解析（trace）—— 单次 GET，跑在 TTFB 采样之前，用于提前丢弃黑名单地区。 */
+        const val STAGE_TRACE: String = "trace"
 
         const val STAGE_PROBE: String = "probe"
         const val STAGE_DOWNLOAD: String = "download"

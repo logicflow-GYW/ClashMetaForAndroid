@@ -124,6 +124,13 @@ class CfOptimizerParamsDesign(
             )
 
             editableText(
+                value = cfSettings::traceConcurrencyRaw,
+                adapter = stringAdapter,
+                title = R.string.cf_optimizer_trace_concurrency,
+                empty = R.string.cf_optimizer_not_set,
+            )
+
+            editableText(
                 value = cfSettings::ttfbSamplesRaw,
                 adapter = stringAdapter,
                 title = R.string.cf_optimizer_ttfb_samples,
@@ -189,6 +196,13 @@ class CfOptimizerParamsDesign(
             )
 
             editableText(
+                value = cfSettings::minDownloadMbpsRaw,
+                adapter = stringAdapter,
+                title = R.string.cf_optimizer_min_download_mbps,
+                empty = R.string.cf_optimizer_not_set,
+            )
+
+            editableText(
                 value = cfSettings::maxEntriesRaw,
                 adapter = stringAdapter,
                 title = R.string.cf_optimizer_max_entries,
@@ -215,6 +229,13 @@ class CfOptimizerParamsDesign(
                 value = cfSettings::scoreBwWeightRaw,
                 adapter = stringAdapter,
                 title = R.string.cf_optimizer_score_bw_weight,
+                empty = R.string.cf_optimizer_not_set,
+            )
+
+            editableText(
+                value = cfSettings::scoreBwRefMbpsRaw,
+                adapter = stringAdapter,
+                title = R.string.cf_optimizer_score_bw_ref_mbps,
                 empty = R.string.cf_optimizer_not_set,
             )
 

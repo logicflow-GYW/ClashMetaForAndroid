@@ -1,5 +1,6 @@
 package com.github.kr328.clash.service.cfoptimizer
 
+import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerTuning
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
@@ -11,7 +12,10 @@ import java.net.InetAddress
  * 指标由会话 D 的 Android Probe 提供；候选来源由会话 D 装配。
  *
  * 评分基线沿用原 Python 脚本 compute_score（原函数输出 0–1，此处 API 固定 0–100）：
- *   score = (0.6 * max(0, 1 - ttfbMs/800) + 0.4 * min(1, downloadMbps/150)) * 100
+ *   score = (0.6 * max(0, 1 - ttfbMs/800) + 0.4 * min(1, downloadMbps/ref)) * 100
+ * 其中 `ref`（原脚本 `SCORE_MAX_BPS = 150`）可由 [OptimizerLimits.bwRefMbps] 覆盖，本仓库默认 50 ——
+ * 理由是 150 在 10–30 Mbps 链路上让带宽分量退化成常数，排序实际只剩 TTFB（见
+ * [CfOptimizerTuning.SCORE_BW_REF_MBPS_DEFAULT] 的实测说明）。
  *
  * 第一期只支持全球单播 IPv4 + 全球单播 IPv6 字面地址；不实现 IPv6 以外的范围之外的地址族，
  * 非 IPv4/IPv6 字面量一律拒绝（不是静默吞掉）。不通过反推地理位置填写地区：地区缺失用 "ZZ"。
@@ -24,8 +28,12 @@ object CfOptimizerEngine {
     /** 评分公式中固定的 TTFB 参考值（毫秒），来自原脚本，不受 [OptimizerLimits.maxTtfbMs] 影响。 */
     const val SCORE_TTFB_REF_MS: Double = 800.0
 
-    /** 评分公式中固定的带宽参考值（Mbps，原脚本下载测速参考）。 */
-    const val SCORE_BW_REF_MBPS: Double = 150.0
+    /**
+     * 评分公式里的带宽参考值（Mbps）—— 单一来源在 [CfOptimizerTuning.SCORE_BW_REF_MBPS_DEFAULT]。
+     * 原脚本是 150（`SCORE_MAX_BPS`），本仓库默认 50 并可由 [OptimizerLimits.bwRefMbps] 覆盖，
+     * 理由见那个常量（150 在 10–30 Mbps 链路上让带宽分量退化成常数）。
+     */
+    const val SCORE_BW_REF_MBPS: Double = CfOptimizerTuning.SCORE_BW_REF_MBPS_DEFAULT
 
     /** 地区缺失时的占位值（不从 IP 反推地理位置）。 */
     const val REGION_FALLBACK: String = "ZZ"
@@ -88,7 +96,7 @@ object CfOptimizerEngine {
             if (m.ttfbMs > limits.maxTtfbMs) continue
             if (m.jitterMs > limits.maxJitterMs) continue
             if (m.downloadMbps < limits.minDownloadMbps) continue
-            val score = scoreOf(m, limits.weights)
+            val score = scoreOf(m, limits.weights, limits.bwRefMbps)
             if (score < limits.minScore) continue
             val entry = OptimizedEntry(
                 address = address,
@@ -117,10 +125,17 @@ object CfOptimizerEngine {
     }
 
     /** 按原脚本公式计算 0–100 分（权重可调；按权重和归一化，满分恒 100）。 */
-    fun scoreOf(m: ProbeMetrics, weights: ScoreWeights = ScoreWeights()): Double {
+    fun scoreOf(
+        m: ProbeMetrics,
+        weights: ScoreWeights = ScoreWeights(),
+        bwRefMbps: Double = SCORE_BW_REF_MBPS,
+    ): Double {
         val w = weights.normalized
         val ttfbPart = w.ttfb * maxOf(0.0, 1.0 - m.ttfbMs / SCORE_TTFB_REF_MS)
-        val bwPart = w.bw * minOf(1.0, m.downloadMbps / SCORE_BW_REF_MBPS)
+        // 参考值先夹到正数：0/负数/NaN 会让 `mbps / ref` 变成 Inf/NaN，把整列分数拉平 ——
+        // 那不是"调参"，是静默关闭带宽分量（用户填了非法值时按默认口径算，不按 NaN 算）。
+        val ref = if (bwRefMbps.isFinite() && bwRefMbps > 0.0) bwRefMbps else SCORE_BW_REF_MBPS
+        val bwPart = w.bw * minOf(1.0, m.downloadMbps / ref)
         return (ttfbPart + bwPart) * 100.0
     }
 

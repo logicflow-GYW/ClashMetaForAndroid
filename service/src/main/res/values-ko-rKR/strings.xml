@@ -20,6 +20,7 @@
     <string name="cf_optimizer_service">CF 최적화</string>
     <string name="cf_optimizer_result_success">%1$d개 노드를 최적화하고 업로드했습니다</string>
     <string name="cf_optimizer_stage_sources">소스 목록 가져오는 중</string>
+    <string name="cf_optimizer_stage_trace">지역 확인 중 %1$d/%2$d</string>
     <string name="cf_optimizer_stage_probe">프로브 중 %1$d/%2$d</string>
     <string name="cf_optimizer_stage_rank">점수 계산 중</string>
     <string name="cf_optimizer_stage_download">속도 측정 %1$d/%2$d</string>

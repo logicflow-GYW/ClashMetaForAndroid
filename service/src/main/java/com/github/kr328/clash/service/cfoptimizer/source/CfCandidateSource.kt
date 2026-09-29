@@ -30,9 +30,21 @@ object CfCandidateSource {
     /**
      * 内置备胎源（原版 auto_update_config 终极兜底列表）。
      */
+    /**
+     * 内置源 —— 只在导航站发现失败时兜底用，所以这里放"实测活着且富"的源。
+     *
+     * 2026-09-30 实测（逐源 curl 计数有效 IP 行）：`zip.cm.edu.kg` 15490 行、
+     * `bestcf.pages.dev/s5gy` 293 行、`LancelotRar/best-cf-ips` top400 400 行。
+     * **换掉的旧源** `https://mirror.ghproxy.com/...gslege/CloudflareIP/main/All.txt` 实测 **0 行**
+     * （ghproxy 镜像已失效）—— 留着一个死源不会报错，只会静默少一份候选。
+     *
+     * 刻意**不收** WARP-MASQUE 两个富源（各 2048 行）：那是 WARP/MASQUE（UDP）的地址，
+     * 与本功能要的"TCP 直连入口 IP"不是一回事。
+     */
     val BUILTIN_SOURCE_URLS: List<String> = listOf(
         "https://zip.cm.edu.kg/all.txt",
-        "https://mirror.ghproxy.com/https://raw.githubusercontent.com/gslege/CloudflareIP/main/All.txt",
+        "https://bestcf.pages.dev/s5gy/all.txt",
+        "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/refs/heads/main/best-cf-ip-scanned-top400.txt",
     )
 
     /**

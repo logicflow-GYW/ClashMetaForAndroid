@@ -19,6 +19,8 @@ data class CfProbeConfig(
     val tcpTimeoutMs: Int = CfOptimizerTuning.TCP_TIMEOUT_MS_DEFAULT,
     /** TTFB/trace 探测并发（原版 `MAX_TTFB_WORKERS`）。 */
     val probeConcurrency: Int = CfOptimizerTuning.PROBE_CONCURRENCY_DEFAULT,
+    /** 地区解析（trace）并发（原版 `MAX_TRACE_WORKERS`）—— 单次 GET，单价低于 TTFB 采样。 */
+    val traceConcurrency: Int = CfOptimizerTuning.TRACE_CONCURRENCY_DEFAULT,
     /** 单候选 TTFB 采样次数（原版硬编码 3）。 */
     val ttfbSamples: Int = CfOptimizerTuning.TTFB_SAMPLES_DEFAULT,
     /** 进测速的窄池大小（原版 `BW_TOP_N` / `TTFB_POOL_LIMIT`）。 */
