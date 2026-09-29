@@ -1,46 +1,124 @@
-## Clash Meta for Android
+## ClashPilot
 
-A Graphical user interface of [Clash.Meta](https://github.com/MetaCubeX/Clash.Meta) for Android
+ClashPilot 是 [Clash Meta for Android (CMFA)](https://github.com/MetaCubeX/ClashMetaForAndroid) 的 fork，
+在上游全部功能之上内置了一个**自动优选 Cloudflare 入口 IP 并自动维护订阅**的模块。
 
-### Feature
+不用再手动跑优选脚本、不用再把结果贴来贴去：应用在真实底层网络上探测候选 IP、按延迟与吞吐打分、
+把胜出的节点写进你的 Worker 共享列表，然后刷新绑定的订阅。
 
-Feature of [Clash.Meta](https://github.com/MetaCubeX/Clash.Meta)
+> **与上游的关系**：主体功能与 mihomo 内核跟随上游，差异只有两块 —— ① CF 优选模块
+> （`service/src/main/java/com/github/kr328/clash/service/cfoptimizer/`）；② 品牌与包名。
+> 内核仍来自 [MetaCubeX/Clash.Meta](https://github.com/MetaCubeX/Clash.Meta)，整体以 GPL-3.0 发布，
+> 见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。
 
-[<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png"
-     alt="Get it on F-Droid"
-     height="80">](https://f-droid.org/packages/com.github.metacubex.clash.meta/)
+### 与上游的差异
 
-### Requirement
+| | 上游 CMFA | ClashPilot |
+|---|---|---|
+| CF 优选 | 无 | 内置（拉源 → 探测 → 测速 → 评分 → 上传 → 刷新订阅）|
+| applicationId | `com.github.metacubex.clash[.alpha\|.meta]` | `cc.logicflash.clashpilot[.alpha\|.meta]` |
+| 应用名 | Clash Meta for Android | ClashPilot |
 
-- Android 5.0+ (minimum)
-- Android 7.0+ (recommend)
-- `armeabi-v7a` , `arm64-v8a`, `x86` or `x86_64` Architecture
+> ⚠️ **包名与签名都和上游不同**：无法覆盖安装上游版本；反过来也一样。
+> 两者可以共存（包名不同），但**配置、订阅、密钥都不共享** —— 这是全新安装，不能从上游版本"升级"过来。
 
-### Build
+### 安装
 
-1. Update submodules
+从 [Releases](../../releases) 下载对应架构的 APK：
+
+- `*-arm64-v8a-*.apk` — 绝大多数现代手机
+- `*-armeabi-v7a-*.apk` — 老设备
+- `*-universal-*.apk` — 不确定就选它（体积最大）
+
+Alpha 变体（`cc.logicflash.clashpilot.alpha`）与稳定变体可同时安装。
+
+### CF 优选怎么用
+
+1. **准备 Worker**：部署一个提供 `POST /login`（表单字段 `password`，返回 JSON `{"success":true}` 并下发会话
+   Cookie）与 `POST /admin/ADD.txt`（同一 origin，`text/plain` 正文即节点列表）的共享列表服务。
+2. **设置 → CF 优选 → Worker 地址**：填 Worker 的 HTTPS 源（仅接受规范 HTTPS origin，带路径或查询串会被拒绝）。
+3. **上传密码**：本地以 Android Keystore（AES-256/GCM）加密保存，**永不回显**；界面只显示"已设置/未设置"。
+4. **绑定的订阅**：选一个 **URL 类型**的订阅（它的内容由上面的 Worker 提供）。优选成功后应用会自动刷新它。
+5. **立即运行优选**：跑一轮。第一次会提示"共享列表是全体设备共用的，本轮结果会覆盖它"。
+6. 也可以打开**网络切换时自动扫描**，在网络变化时自动重跑。
+
+运行时顶部通知栏会实时显示阶段与进度；设置页中"立即运行优选"这一行的副标题会显示当前阶段
+或上次成功时间。
+
+### 它是怎么工作的
+
+```
+① sources   从导航站发现镜像源（失败则回退本地缓存 → 内置备用源），抽样拉取候选 IP
+② probe     对每个候选测 3 次 TTFB（取中位数 + 全距抖动），并查 /cdn-cgi/trace 拿归属地区
+③ download  对最快的若干候选实测吞吐（下载测速，可关）
+④ rank      打分 = (0.6 × TTFB 项 + 0.4 × 带宽项) × 100，按分数排序 → /24 网段去重 → 每地区配额
+⑤ upload    质量门通过后整体覆写 Worker 共享列表（失败/空列表一律不覆盖）
+⑥ refresh   刷新你绑定的订阅（失败会重试 2 次，列表已上传的结果不会被回滚）
+```
+
+**网络行为（重要）**：优选的**所有**网络 I/O —— 拉源、探测、测速、上传 —— 都绑定到
+**真实物理网络**（Wi-Fi 优先，否则蜂窝），并显式排除 VPN 接口。
+换句话说，**开着代理也能正常优选**：这些请求不会回流进本应用自己的 TUN，也就不会被自己的规则
+送进代理节点绕远路（这正是早期版本"关代理顺利、开代理上传失败"的原因）。
+订阅刷新由 mihomo 内核执行，这一环不受本模块控制。
+
+**失败语义**：全程 fail-safe —— 空候选、未过质量门、上传失败都**不会**覆盖 Worker 上已有的列表；
+订阅刷新失败时上传结果仍然保留，通知里会如实区分「已上传 / 订阅刷新失败」。
+
+### 运行参数
+
+「运行参数」是高级项，**不确定就保持默认**（留空或填非法值会自动回落到默认）。
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| 排除国家 | `RU,KP,CN,HK` | 两位 ISO 地区码，按 IP 的 Cloudflare trace 归属地判定。trace 失败的候选**保留**（未知 ≠ 被封） |
+| 只选国家 | 空 | 空 = 不启用白名单；填了则只保留命中地区的候选 |
+| 每轮源数 | 8 | 每轮从镜像源池抽取多少个源 |
+| 单源抽样 | 40 | 每个源在去重前取多少行 |
+| 候选上限 | 80 | 进入探测的 IP 数量（耗时主要在这一步）|
+| 上传门槛 | 5 | 至少要有多少个达标节点才覆盖共享列表（防侥幸覆盖）|
+| 每地区上限 | 2 | 同一个 Cloudflare 地区最多贡献几个节点（多样性）|
+| 下载测速 | 开 | 对最快的候选实测吞吐（占评分 40%）。关掉省流量，但排序会退化成纯延迟排序 |
+
+一轮典型耗时约 1~2 分钟（80 个候选、并发 12），其中探测占大头。
+下载测速只测延迟最优的 20 个候选，单次最多 3MB。
+
+### 自动化 / 外部控制
+
+应用的 applicationId 由构建变体决定（`cc.logicflash.clashpilot` + `.alpha` / `.meta`），
+下文以 Alpha 变体（`cc.logicflash.clashpilot.alpha`）为例：
+
+- 切换服务状态：向 `com.github.kr328.clash.ExternalControlActivity` 发 action `cc.logicflash.clashpilot.alpha.action.TOGGLE_CLASH`
+- 启动服务：action `cc.logicflash.clashpilot.alpha.action.START_CLASH`
+- 停止服务：action `cc.logicflash.clashpilot.alpha.action.STOP_CLASH`
+- 导入订阅：URL Scheme `clash://install-config?url=<encoded URI>` 或 `clashmeta://install-config?url=<encoded URI>`
+
+### 构建
+
+1. 拉取子模块
 
    ```bash
    git submodule update --init --recursive
    ```
 
-2. Install **OpenJDK 11**, **Android SDK**, **CMake** and **Golang**
+2. 安装 **OpenJDK 21**、**Android SDK**、**CMake** 与 **Golang**
 
-3. Create `local.properties` in project root with
+3. 在项目根目录创建 `local.properties`
 
    ```properties
    sdk.dir=/path/to/android-sdk
    ```
 
-4. (Optional) Custom app package name. Add the following configuration to `local.properties`.
+4. （可选）自定义包名与后缀
 
    ```properties
-   # config your ownn applicationId, or it will be 'com.github.metacubex.clash'
-   custom.application.id=com.my.compile.clash
-   # remove application id suffix, or the applicaion id will be 'com.github.metacubex.clash.alpha'
+   # 自定义 applicationId，默认为 cc.logicflash.clashpilot
+   custom.application.id=cc.my.compile.clashpilot
+   # 去掉 .alpha / .meta 后缀
    remove.suffix=true
+   ```
 
-5. Create `signing.properties` in project root with
+5. 在项目根目录创建 `signing.properties`
 
    ```properties
    keystore.path=/path/to/keystore/file
@@ -49,39 +127,18 @@ Feature of [Clash.Meta](https://github.com/MetaCubeX/Clash.Meta)
    key.password=<key password>
    ```
 
-6. Build
+6. 构建
 
    ```bash
    ./gradlew app:assembleAlphaRelease
    ```
 
-### Automation
+### 许可与致谢
 
-APP package name is `com.github.metacubex.clash.meta`
-
-- Toggle Clash.Meta service status
-  - Send intent to activity `com.github.kr328.clash.ExternalControlActivity` with action `com.github.metacubex.clash.meta.action.TOGGLE_CLASH`
-- Start Clash.Meta service
-  - Send intent to activity `com.github.kr328.clash.ExternalControlActivity` with action `com.github.metacubex.clash.meta.action.START_CLASH`
-- Stop Clash.Meta service
-  - Send intent to activity `com.github.kr328.clash.ExternalControlActivity` with action `com.github.metacubex.clash.meta.action.STOP_CLASH`
-- Import a profile
-  - URL Scheme `clash://install-config?url=<encoded URI>` or `clashmeta://install-config?url=<encoded URI>`
-
-### Contribution and Project Maintenance
-
-#### Meta Kernel
-
-- CMFA uses the kernel from `android-real` branch under `MetaCubeX/Clash.Meta`, which is a merge of the main `Alpha` branch and `android-open`.
-  - If you want to contribute to the kernel, make PRs to `Alpha` branch of the Meta kernel repository.
-  - If you want to contribute Android-specific patches to the kernel, make PRs to  `android-open` branch of the Meta kernel repository.
-
-#### Maintenance
-
-- When `MetaCubeX/Clash.Meta` kernel is updated to a new version, the `Update Dependencies` actions in this repo will be triggered automatically.
-  - It will pull the new version of the meta kernel, update all the golang dependencies, and create a PR without manual intervention.
-  - If there is any compile error in PR, you need to fix it before merging. Alternatively, you may merge the PR directly.
-- Manually triggering `Build Pre-Release` actions will compile and publish a `PreRelease` version.
-- Manually triggering `Build Release` actions will compile, tag and publish a `Release` version.
-  - You must fill the blank `Release Tag` with the tag you want to release in the format of `v1.2.3`.
-  - `versionName` and `versionCode` in `build.gradle.kts` will be automatically bumped to the tag you filled above.
+- 本项目以 **GPL-3.0** 发布，见 [LICENSE](LICENSE)。
+- 上游：[MetaCubeX/ClashMetaForAndroid](https://github.com/MetaCubeX/ClashMetaForAndroid)（Android 外壳）与
+  [MetaCubeX/Clash.Meta](https://github.com/MetaCubeX/Clash.Meta)（mihomo 内核，`android-real` 分支）。
+- 本 fork 保留上游全部版权声明与许可条款；改名与新增模块不影响上游署名。
+  本项目与 MetaCubeX 官方**无关联**，请勿把问题反馈到上游仓库。
+- CF 优选的算法口径对齐自社区优选脚本（TTFB 中位数 + 全距抖动、`/cdn-cgi/trace` 地区、评分
+  `0.6 × (1 − ttfb/800ms) + 0.4 × min(1, mbps/150)`、`/24` 去重、每地区配额）。

@@ -12,13 +12,13 @@
     <string name="tun_stack_mips">Mips</string>
     <string name="tun_stack_mode">Chế độ xếp chồng dữ liệu</string>
     <string name="tun_stack_system">Hệ thống</string>
-    <string name="application_name_alpha">Clash Meta</string>
-    <string name="application_name_meta">Clash Meta</string>
+    <string name="application_name_alpha">ClashPilot Alpha</string>
+    <string name="application_name_meta">ClashPilot</string>
     <string name="clash_meta_core">Clash Meta Core</string>
     <string name="clash_meta_for_android">Clash Meta</string>
     <string name="clash_meta_wiki">Clash Meta Wiki</string>
-    <string name="launch_name_alpha">Clash Meta</string>
-    <string name="launch_name_meta">Clash Meta</string>
+    <string name="launch_name_alpha">ClashPilot Alpha</string>
+    <string name="launch_name_meta">ClashPilot</string>
     <string name="_new">Mới</string>
     <string name="about">Thông tin</string>
     <string name="accept_http_content">Chỉ chấp nhận http(s)</string>
@@ -271,6 +271,11 @@
     <string name="cf_optimizer_shared_list_title">Xác nhận danh sách chia sẻ</string>
     <string name="cf_optimizer_shared_list_message">Danh sách ADD.txt của Worker được chia sẻ giữa mọi thiết bị và đăng ký dùng Worker này. Chạy tối ưu sẽ ghi đè bằng kết quả của thiết bị này.</string>
     <string name="cf_optimizer_params">Tham số chạy</string>
+    <string name="cf_optimizer_tips_overview">Đo các IP ứng viên Cloudflare trên mạng nền thật (không đi qua VPN của chính ứng dụng này), chấm điểm, ghi các nút thắng vào danh sách chia sẻ của Worker rồi làm mới gói đăng ký đã liên kết.&lt;br&gt;&lt;br&gt;① Kết nối: nơi công bố kết quả. ② Tự động hoá: khi nào chạy. ③ Tham số chạy: tinh chỉnh nâng cao, không chắc thì để mặc định.</string>
+    <string name="cf_optimizer_tips_params">Loại trừ / Chỉ chọn quốc gia: mã vùng ISO hai ký tự, xét theo vị trí Cloudflare trace của IP; ứng viên trace thất bại vẫn được giữ (không rõ không có nghĩa là bị chặn).&lt;br&gt;Số nguồn mỗi lượt: lấy bao nhiêu nguồn gương mỗi lượt.&lt;br&gt;Mẫu mỗi nguồn: số dòng lấy từ mỗi nguồn trước khi loại trùng.&lt;br&gt;Giới hạn ứng viên: số IP được đo (bước chậm nhất).&lt;br&gt;Ngưỡng tải lên: số nút đạt chuẩn tối thiểu trước khi ghi đè danh sách chia sẻ.&lt;br&gt;Giới hạn mỗi vùng: số nút tối đa một vùng Cloudflare đóng góp.&lt;br&gt;Đo tải xuống: đo thông lượng thực của các ứng viên nhanh nhất (40% điểm).</string>
+    <string name="cf_optimizer_download_test">Đo tốc độ tải xuống</string>
+    <string name="cf_optimizer_download_test_summary">Đo thông lượng thực tế trên các ứng viên nhanh nhất (chiếm 40% điểm). Tắt để tiết kiệm dữ liệu di động.</string>
+    <string name="cf_optimizer_last_success">Thành công lần cuối %1$s</string>
     <string name="cf_optimizer_exclude_countries">Quốc gia loại trừ (phân cách bởi dấu phẩy)</string>
     <string name="cf_optimizer_only_countries">Chỉ các quốc gia này (để trống = tắt)</string>
     <string name="cf_optimizer_sources_per_run">Nguồn mỗi lần chạy</string>
@@ -278,6 +283,4 @@
     <string name="cf_optimizer_max_candidates">Giới hạn ứng viên</string>
     <string name="cf_optimizer_min_upload_entries">Ngưỡng tải lên</string>
     <string name="cf_optimizer_max_per_region">Tối đa mỗi khu vực</string>
-    <string name="cf_optimizer_status_title">Trạng thái chạy</string>
-    <string name="cf_optimizer_status_idle">Chưa chạy</string>
 </resources>

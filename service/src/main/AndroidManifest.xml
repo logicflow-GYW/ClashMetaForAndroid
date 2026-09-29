@@ -62,7 +62,7 @@
             <!-- Package-limited implicit broadcast from the settings UI: a manifest
                  receiver without an intent-filter only receives explicit intents. -->
             <intent-filter>
-                <action android:name="com.github.metacubex.clash.action.RUN_CF_OPTIMIZER" />
+                <action android:name="cc.logicflash.clashpilot.action.RUN_CF_OPTIMIZER" />
             </intent-filter>
         </receiver>
 
