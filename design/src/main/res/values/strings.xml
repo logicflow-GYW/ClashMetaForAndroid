@@ -403,4 +403,11 @@
     <string name="cf_optimizer_max_candidates">Candidate limit</string>
     <string name="cf_optimizer_min_upload_entries">Upload quality gate</string>
     <string name="cf_optimizer_max_per_region">Max per region</string>
+    <string name="cf_optimizer_memory">Memory</string>
+    <string name="cf_optimizer_memory_summary">Remember each IP\'s history: stable nodes are retested first, repeatedly failing ones are skipped during a cooldown</string>
+    <string name="cf_optimizer_data">Export run data</string>
+    <string name="cf_optimizer_data_summary">Memory and run history</string>
+    <string name="cf_optimizer_data_summary_value">Memory: %1$d nodes · %2$d runs recorded</string>
+    <string name="cf_optimizer_export_done">Exported %1$d file(s) to\n%2$s</string>
+    <string name="cf_optimizer_export_empty">Nothing to export yet — run the optimizer once first</string>
 </resources>

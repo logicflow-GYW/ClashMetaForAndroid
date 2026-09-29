@@ -296,4 +296,11 @@
     <string name="cf_optimizer_max_candidates">候補の上限</string>
     <string name="cf_optimizer_min_upload_entries">アップロード基準</string>
     <string name="cf_optimizer_max_per_region">地域あたりの上限</string>
+    <string name="cf_optimizer_memory">メモリ</string>
+    <string name="cf_optimizer_memory_summary">各 IP の履歴を記憶：安定したノードは次回優先的に再測定し、連続失敗は一定期間スキップ</string>
+    <string name="cf_optimizer_data">実行データをエクスポート</string>
+    <string name="cf_optimizer_data_summary">メモリと実行履歴</string>
+    <string name="cf_optimizer_data_summary_value">メモリ %1$d ノード · %2$d 回記録</string>
+    <string name="cf_optimizer_export_done">%1$d 個のファイルを書き出しました\n%2$s</string>
+    <string name="cf_optimizer_export_empty">書き出せるデータがまだありません —— まず一度実行してください</string>
 </resources>

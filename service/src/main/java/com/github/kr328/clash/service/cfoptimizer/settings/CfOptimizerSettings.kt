@@ -147,6 +147,16 @@ class CfOptimizerSettingsStore(context: Context) {
         defaultValue = true,
     )
 
+    /**
+     * 跨轮记忆库（默认开）：记住每个 IP 的历史表现——下轮把稳定节点优先拉回复测、
+     * 连续失败的在冷却期内不再取样探测。关掉 = 每轮从零开始（原版脚本默认行为），
+     * 供"有记忆 vs 无记忆"的对照实验用。
+     */
+    var memoryEnabled: Boolean by store.boolean(
+        key = "cfoptimizer_memory_enabled",
+        defaultValue = true,
+    )
+
     private val customEntriesDelegate by store.string(
         key = "cfoptimizer_custom_entries",
         defaultValue = "",

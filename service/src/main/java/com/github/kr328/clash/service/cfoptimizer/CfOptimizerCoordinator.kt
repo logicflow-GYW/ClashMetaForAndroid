@@ -2,6 +2,10 @@ package com.github.kr328.clash.service.cfoptimizer
 
 import android.content.Context
 import com.github.kr328.clash.service.ProfileProcessor
+import com.github.kr328.clash.service.cfoptimizer.history.CfOptimizerRunLog
+import com.github.kr328.clash.service.cfoptimizer.history.CfRunRecorder
+import com.github.kr328.clash.service.cfoptimizer.memory.CfMemoryScoring
+import com.github.kr328.clash.service.cfoptimizer.memory.CfMemoryStore
 import com.github.kr328.clash.service.cfoptimizer.net.PhysicalNetwork
 import com.github.kr328.clash.service.cfoptimizer.probe.CfProbe
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsStore
@@ -35,7 +39,42 @@ class CfOptimizerCoordinator(private val context: Context) {
         val profileError: String?,
     )
 
+    /**
+     * 跑一轮优选，并把这一轮的痕迹留下来（记忆库写回 + 运行历史落盘）。
+     *
+     * 落盘放在 `finally`：质量门不足 / 上传失败 / 异常退出同样留证据——
+     * 恰恰是这些轮次最需要事后能看（"为什么这轮没出结果"再也无法复盘的时代结束了）。
+     */
     suspend fun run(onProgress: suspend (stage: String, progress: Int, total: Int) -> Unit = { _, _, _ -> }): Result {
+        val startedAt = System.currentTimeMillis()
+        val recorder = CfRunRecorder()
+        val runLog = CfOptimizerRunLog(context)
+
+        var outcome: CfOptimizerRunLog.Outcome? = null
+
+        try {
+            val result = runRecorded(recorder, onProgress)
+
+            outcome = CfOptimizerRunLog.Outcome(
+                uploaded = result.uploaded,
+                profileUpdated = result.profileUpdated,
+                reason = result.uploadReason,
+            )
+
+            return result
+        } catch (e: Exception) {
+            recorder.failReason = e.javaClass.simpleName
+
+            throw e
+        } finally {
+            runLog.persist(recorder, outcome, startedAt)
+        }
+    }
+
+    private suspend fun runRecorded(
+        recorder: CfRunRecorder,
+        onProgress: suspend (stage: String, progress: Int, total: Int) -> Unit,
+    ): Result {
         val settingsStore = CfOptimizerSettingsStore(context)
         val secretStore = KeystoreCfOptimizerSecretStore(context)
 
@@ -60,11 +99,20 @@ class CfOptimizerCoordinator(private val context: Context) {
         val minUploadEntries = settingsStore.minUploadEntries
         val maxPerRegion = settingsStore.maxPerRegion
         val downloadTestEnabled = settingsStore.downloadTestEnabled
+        val memoryEnabled = settingsStore.memoryEnabled
+
+        // 跨轮记忆库（原版 cf_memory.py 的 App 等价物）：默认开。
+        // 关掉 = 每轮从零开始（原版脚本的默认行为），用于对照实验。
+        val memory = if (memoryEnabled) CfMemoryStore(context) else null
 
         // 物理网络出口：本模块**所有** Java 侧网络 I/O（拉源 / 探测 / 上传）统一绑它。
         // 不绑的后果（真机实测）：开着代理时请求回流进本应用 TUN → 被自己的规则送进代理
         // 节点 → 上传失败/超时，而关掉代理就一切正常。
         val physicalNetwork = PhysicalNetwork.pick(context)
+
+        // 网络标签提前取（记忆库、运行历史、Worker 行三处共用同一个值，
+        // 避免同一轮里出现两个不一致的标签）。
+        val networkTag = PhysicalNetwork.transportTag(context, physicalNetwork)
 
         // 1. 源发现（导航站 → 缓存 → 内置兜底）+ 拉取候选。
         val state = StateStore(context)
@@ -96,14 +144,34 @@ class CfOptimizerCoordinator(private val context: Context) {
             return Result(0, 0, false, "candidates_${e.javaClass.simpleName}", false, null)
         }
 
-        // 1.5 记忆库优先节点（原版第一层 priority_ips 的 App 等价物）：上轮成功写入
-        //     Worker 的节点本轮优先复测——即使源抽样没抽到它们，稳的节点不丢。
+        // 1.5 优先复测池 = 记忆库置信度 top-N（跨轮历史）+ 上轮写入 Worker 的节点。
+        //     记忆库比 last-known-good 更准：它记得谁**稳定**，而不只是谁上一轮在名单里；
+        //     置信度含成功率、新鲜度衰减与"当前时段"加成（原版 get_priority_candidates 口径）。
+        val memoryCandidates = memory?.priorities(MEMORY_POOL_LIMIT).orEmpty().mapNotNull { priority ->
+            val candidate = CandidateIp(priority.address, priority.port, source = "memory")
+
+            if (candidates.any { it.address == candidate.address && it.port == candidate.port }) {
+                null
+            } else {
+                candidate
+            }
+        }
+
         val lastGood = state.lastKnownGood()
         val lastGoodCandidates = lastGood.mapNotNull { line ->
             parseWorkerLine(line)?.let { CandidateIp(it.first, it.second, source = "lastgood") }
         }.filter { lg -> candidates.none { it.address == lg.address && it.port == lg.port } }
 
-        val allCandidates = lastGoodCandidates + candidates
+        // 记忆库里连续失败达阈值的地址：冷却期内不再从源池取样探测（把配额留给新 IP）。
+        // 只过滤"新来的"源候选——优先池里的节点是历史验证过的，不在此列。
+        val blockedAddresses = memory?.blockedAddresses().orEmpty()
+        val freshCandidates = candidates.filter { it.address !in blockedAddresses }
+
+        // 优先池在前、源候选在后，总池封顶 —— 记忆池越大，留给"探索新 IP"的名额越少，
+        // 这就是探索/利用的权衡点：上一轮稳定节点越可信，本轮越省探测时间。
+        val allCandidates = (memoryCandidates + lastGoodCandidates + freshCandidates)
+            .distinctBy { it.address to it.port }
+            .take(maxCandidates + MEMORY_POOL_LIMIT)
 
         if (allCandidates.isEmpty()) {
             return Result(0, 0, false, "no_candidates", false, null)
@@ -171,6 +239,20 @@ class CfOptimizerCoordinator(private val context: Context) {
         //     让 Worker 列表分散在不同网段；去重后不足质量门则不上传。
         ranked = dedupeByPrefix(ranked)
 
+        // 3.7 记忆库写回（原版 record_result）。放在这里而不是"上传成功后"：
+        //     质量门不足 / 上传失败的轮次同样长记忆——失败轮恰恰是记忆库最该记住的。
+        recordMemory(memory, allCandidates, scoredMetrics, ranked)
+
+        recorder.capture(
+            candidates = allCandidates,
+            metrics = scoredMetrics,
+            ranked = ranked,
+            networkTag = networkTag,
+            memorySize = memory?.size() ?: 0,
+            memoryReused = memoryCandidates.size,
+            memoryBlocked = blockedAddresses.size,
+        )
+
         if (ranked.size < minUploadEntries) {
             return Result(allCandidates.size, ranked.size, false, "below_quality_gate", false, null)
         }
@@ -179,7 +261,6 @@ class CfOptimizerCoordinator(private val context: Context) {
         //    本轮优选行在后。空列表不上传（客户端 fail closed，双保险）。
         state.saveRunState(STAGE_UPLOAD, 0, 1)
         onProgress(STAGE_UPLOAD, 0, 1)
-        val networkTag = PhysicalNetwork.transportTag(context, physicalNetwork)
         val entries = settingsStore.customEntries.orEmpty().filter { it.isNotBlank() } +
                 ranked.map { it.toWorkerLine(networkTag) }
 
@@ -227,6 +308,58 @@ class CfOptimizerCoordinator(private val context: Context) {
     }
 
     /**
+     * 把本轮实测写回记忆库（原版 `record_result` 的三态语义）：
+     * - 入选（越过质量门且被 /24 去重保留）→ full + score：参与 avg_score EMA 与时段桶
+     * - 可达但没入选 → tcp：只累 tcp_hits、清 fail_streak，**不拉低** avg_score
+     * - 连不上 → fail：fail_streak +1，达到阈值后进入冷却，下轮不再浪费探测配额
+     */
+    private fun recordMemory(
+        memory: CfMemoryStore?,
+        candidates: List<CandidateIp>,
+        metrics: Map<CandidateIp, ProbeMetrics>,
+        ranked: List<OptimizedEntry>,
+    ) {
+        if (memory == null) return
+
+        val selected = ranked.associateBy { it.address to it.port }
+
+        candidates.forEach { candidate ->
+            val entry = selected[candidate.address to candidate.port]
+            val measured = metrics[candidate]
+            val key = CfMemoryStore.key(candidate.address, candidate.port)
+
+            when {
+                entry != null -> memory.record(
+                    key = key,
+                    cc = entry.region,
+                    passed = true,
+                    score = entry.score,
+                    ttfbMs = entry.ttfbMs.toDouble(),
+                    mbps = entry.downloadMbps,
+                    rangeOk = true,
+                    stage = CfMemoryScoring.STAGE_FULL,
+                )
+
+                measured != null -> memory.record(
+                    key = key,
+                    cc = measured.region,
+                    passed = false,
+                    stage = CfMemoryScoring.STAGE_TCP,
+                )
+
+                else -> memory.record(
+                    key = key,
+                    cc = "",
+                    passed = false,
+                    stage = CfMemoryScoring.STAGE_FAIL,
+                )
+            }
+        }
+
+        memory.flush()
+    }
+
+    /**
      * 解析 Worker 行 `IP:port#tag` 回 (address, port)——用于把 last-known-good 节点
      * 还原成候选（原版记忆库优先节点的等价物）。
      */
@@ -268,6 +401,9 @@ class CfOptimizerCoordinator(private val context: Context) {
 
         /** 探测网络不可用时的兜底标签。 */
         const val DEFAULT_TAG: String = "DefaultNet"
+
+        /** 每轮从记忆库取多少条优先复测（原版 priority_ips 的 App 等价物）。 */
+        const val MEMORY_POOL_LIMIT: Int = 20
 
         /**
          * 下载测速关闭时的门槛分。契约基线 30 分按「评分上限 60」等比折半——
