@@ -296,6 +296,21 @@ object CfOptimizerTuning {
     fun memoryPoolLimit(raw: String?): Int =
         intOf(raw, MEMORY_POOL_LIMIT_DEFAULT, MEMORY_POOL_LIMIT_MIN, MEMORY_POOL_LIMIT_MAX)
 
+    // ── 劣化自动补货节流（CfQualityTriggerModule / CfQualityGate 消费）──
+
+    /**
+     * 自动补货最小间隔（小时）：距上次优选不足这个时长一律不触发。
+     * 唯一作用是兜住「劣化但优选修不好」的失败循环（上游源全挂 / 运营商本身差）——
+     * 没有它，质量门每 30 分钟判一次就会每 30 分钟空跑一轮，白烧流量和电。
+     * 默认 6 = 该循环每天最多 4 轮；**0 = 不节流**（用户自担代价）。
+     */
+    const val MIN_INTERVAL_HOURS_DEFAULT = 6
+    const val MIN_INTERVAL_HOURS_MIN = 0
+    const val MIN_INTERVAL_HOURS_MAX = 168
+
+    fun minIntervalHours(raw: String?): Int =
+        intOf(raw, MIN_INTERVAL_HOURS_DEFAULT, MIN_INTERVAL_HOURS_MIN, MIN_INTERVAL_HOURS_MAX)
+
     /**
      * 评分权重。两权重之和为 0（用户两个都填 0）时**回落默认** —— 否则所有候选得分恒为 0、
      * 名单被门槛清空，那不是"调参"，是把自己关在门外。

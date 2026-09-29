@@ -275,6 +275,7 @@
     <string name="cf_optimizer_subscription_profile_none">未綁定</string>
     <string name="cf_optimizer_custom_entries">自訂靜態行</string>
     <string name="cf_optimizer_auto_heal">劣化自動補貨</string>
+    <string name="cf_optimizer_min_interval_hours">自動補貨最小間隔（小時，預設 6，0 = 不限）</string>
     <string name="cf_optimizer_auto_heal_summary">多數節點失聯或變慢時自動跑一輪完整優選（最快 6 小時一次），預設關閉。不限網路類型（Wi-Fi 與流動數據皆可）。</string>
     <string name="cf_optimizer_run_now">立即執行優選</string>
     <string name="cf_optimizer_run_now_summary">測速候選 IP 並更新 Worker 共享列表</string>

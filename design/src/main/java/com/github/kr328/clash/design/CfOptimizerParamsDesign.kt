@@ -289,6 +289,13 @@ class CfOptimizerParamsDesign(
                 summary = R.string.cf_optimizer_auto_heal_summary,
             )
 
+            editableText(
+                value = cfSettings::minIntervalHoursRaw,
+                adapter = stringAdapter,
+                title = R.string.cf_optimizer_min_interval_hours,
+                empty = R.string.cf_optimizer_not_set,
+            )
+
             category(R.string.cf_optimizer_group_manual)
 
             editableTextList(

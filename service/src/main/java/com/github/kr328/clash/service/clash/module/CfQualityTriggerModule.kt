@@ -17,7 +17,8 @@ import kotlinx.coroutines.isActive
  * 劣化自动补货 —— 挂在 Clash 服务生命周期里（Clash 在跑才检查，停了协程随之取消）。
  *
  * Clash 核心的 url-test 组本来每 interval 就跑一轮健康检查；本模块每 30 分钟读一次
- * 核心里的延迟数据，多数节点失联/变慢且距上次优选 ≥6 小时时，走「立即运行」同一条
+ * 核心里的延迟数据，多数节点失联/变慢且距上次优选超过节流窗（默认 6 小时，运行参数里可改，
+ * 0 = 不限）时，走「立即运行」同一条
  * 广播链路触发一轮完整优选。任何一步失败只记日志，不影响代理本身。
  */
 class CfQualityTriggerModule(service: Service) : Module<Unit>(service) {
@@ -42,6 +43,7 @@ class CfQualityTriggerModule(service: Service) : Module<Unit>(service) {
                 delays,
                 settings.lastRunAt,
                 System.currentTimeMillis(),
+                settings.minIntervalHours.toLong(),
             )
 
             Log.i(
@@ -80,7 +82,7 @@ class CfQualityTriggerModule(service: Service) : Module<Unit>(service) {
     }
 
     companion object {
-        /** 检查周期（分钟）：读核心内存数据，很便宜；节流在判定里另有 6 小时门。 */
+        /** 检查周期（分钟）：读核心内存数据，很便宜；节流在判定里另有可调门（默认 6 小时，0 = 不限）。 */
         const val CHECK_INTERVAL_MINUTES: Long = 30
 
         /** delay() 只认毫秒 —— 换算只在这里做一次，杜绝「分钟常量直接喂毫秒 API」。 */

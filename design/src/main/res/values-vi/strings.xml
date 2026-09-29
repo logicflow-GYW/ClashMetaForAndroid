@@ -265,6 +265,7 @@
     <string name="cf_optimizer_subscription_profile_none">Không có</string>
     <string name="cf_optimizer_custom_entries">Mục tĩnh tùy chỉnh</string>
     <string name="cf_optimizer_auto_heal">Tự động tối ưu khi suy giảm</string>
+    <string name="cf_optimizer_min_interval_hours">Khoảng cách tối thiểu tự tối ưu, giờ (mặc định 6, 0 = không giới hạn)</string>
     <string name="cf_optimizer_auto_heal_summary">Chạy toàn bộ quy trình tối ưu khi đa số node lỗi hoặc chậm — tối đa 6 giờ một lần. Mặc định tắt.Hoạt động trên mọi loại mạng (Wi-Fi hoặc dữ liệu di động).</string>
     <string name="cf_optimizer_run_now">Chạy tối ưu ngay</string>
     <string name="cf_optimizer_run_now_summary">Đo IP ứng viên và cập nhật danh sách chia sẻ của Worker</string>

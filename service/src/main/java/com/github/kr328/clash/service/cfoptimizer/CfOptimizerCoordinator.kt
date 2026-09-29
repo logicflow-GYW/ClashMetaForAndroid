@@ -6,7 +6,6 @@ import com.github.kr328.clash.service.cfoptimizer.history.CfOptimizerRunLog
 import com.github.kr328.clash.service.cfoptimizer.history.CfRunRecorder
 import com.github.kr328.clash.service.cfoptimizer.memory.CfMemoryScoring
 import com.github.kr328.clash.service.cfoptimizer.memory.CfMemoryStore
-import com.github.kr328.clash.service.cfoptimizer.net.IspTagResolver
 import com.github.kr328.clash.service.cfoptimizer.net.PhysicalNetwork
 import com.github.kr328.clash.service.cfoptimizer.probe.CfProbe
 import com.github.kr328.clash.service.cfoptimizer.probe.CfProbeConfig
@@ -144,10 +143,6 @@ class CfOptimizerCoordinator(private val context: Context) {
         // 不绑的后果（真机实测）：开着代理时请求回流进本应用 TUN → 被自己的规则送进代理
         // 节点 → 上传失败/超时，而关掉代理就一切正常。
         val physicalNetwork = PhysicalNetwork.pick(context)
-
-        // 网络标签提前取（记忆库、运行历史、Worker 行三处共用同一个值，
-        // 避免同一轮里出现两个不一致的标签）。
-        val networkTag = IspTagResolver.resolve(context, physicalNetwork, baseUrl)
 
         // 1. 源发现（导航站 → 缓存 → 内置兜底）+ 拉取候选。
         val state = StateStore(context)
@@ -317,7 +312,6 @@ class CfOptimizerCoordinator(private val context: Context) {
             candidates = allCandidates,
             metrics = scoredMetrics,
             ranked = ranked,
-            networkTag = networkTag,
             memorySize = memory?.size() ?: 0,
             memoryReused = memoryCandidates.size,
             memoryBlocked = blockedAddresses.size,
@@ -337,7 +331,7 @@ class CfOptimizerCoordinator(private val context: Context) {
         state.saveRunState(STAGE_UPLOAD, 0, 1)
         onProgress(STAGE_UPLOAD, 0, 1)
         val entries = settingsStore.customEntries.orEmpty().filter { it.isNotBlank() } +
-                ranked.map { it.toWorkerLine(networkTag) }
+                ranked.map { it.toWorkerLine() }
 
         // 5. 上传 Worker（整体覆写语义：只在本轮有达标结果时才覆盖）。
         val client = CfWorkerClient(
@@ -482,8 +476,6 @@ class CfOptimizerCoordinator(private val context: Context) {
         const val STAGE_UPLOAD: String = "upload"
         const val STAGE_DONE: String = "done"
 
-        /** 探测网络不可用时的兜底标签。 */
-        const val DEFAULT_TAG: String = "DefaultNet"
     }
 }
 

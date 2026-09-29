@@ -29,7 +29,6 @@ class CfRunRecorder {
     var metrics: Map<CandidateIp, ProbeMetrics> = emptyMap()
     var ranked: List<OptimizedEntry> = emptyList()
 
-    var networkTag: String = ""
     var memorySize: Int = 0
     var memoryReused: Int = 0
     var memoryBlocked: Int = 0
@@ -52,7 +51,6 @@ class CfRunRecorder {
         candidates: List<CandidateIp>,
         metrics: Map<CandidateIp, ProbeMetrics>,
         ranked: List<OptimizedEntry>,
-        networkTag: String,
         memorySize: Int,
         memoryReused: Int,
         memoryBlocked: Int,
@@ -60,7 +58,6 @@ class CfRunRecorder {
         this.candidates = candidates
         this.metrics = metrics
         this.ranked = ranked
-        this.networkTag = networkTag
         this.memorySize = memorySize
         this.memoryReused = memoryReused
         this.memoryBlocked = memoryBlocked
@@ -75,8 +72,8 @@ class CfRunRecorder {
  *   CSV 对齐，`analyze_csv.py` 可直接读（它按 `IP地址/端口/网络延迟/下载速度/地区/数据中心` 取值）。
  * - `runs.jsonl` —— 每轮一行摘要（追加，超过 [MAX_RUN_LINES] 行后保留后半段）。
  *   "第 1 轮 vs 第 N 轮"的达标数与耗时就靠它，这是"越用越好"的可复核证据。
- * - `entry_ip_<网络标签>.json` —— 本轮入选结果，结构照抄原脚本 `Output/entry_ip_*.json`
- *   （`{generated_at, net_name, count, nodes:[{ip,port,cc,ttfb_ms,mbps,score}]}`）。
+ * - `entry_ip_<日期>.json` —— 本轮入选结果（原版 `Output/entry_ip_*.json` 的同名式，net_name 已随标签层删去）
+ *   （`{generated_at, count, nodes:[{ip,port,cc,ttfb_ms,mbps,score}]}`）。
  * - `memory.json` —— 跨轮记忆库（由 [CfMemoryStore] 维护，导出时一并复制）。
  *
  * **导出 = 复制**：四个文件原样拷到**下载目录**下的导出子文件夹（`Download/CF优选/`，
@@ -227,7 +224,7 @@ class CfOptimizerRunLog(context: Context) {
     /**
      * 可导出文件集合 = 固定三份（候选明细 / 每轮摘要 / 记忆库）+ 最新的若干份入选结果。
      *
-     * `entry_ip_<网络标签>.json` 是按网络命名的，用户每换一次网络就多一份；全量带出会让
+     * `entry_ip_<日期>.json` 按天命名，一天最多一份；全量带出会让
      * 分享面板被几十个文件塞满，所以只带最近修改的 [MAX_EXPORTED_ENTRIES] 份。
      * ponytail: 只按时间取最新的几份 | 天花板: 需要跨网络对比历史入选结果时看不到旧的 | 升级触发: 用户反馈要对比多网络的历史结果
      */
@@ -309,15 +306,17 @@ class CfOptimizerRunLog(context: Context) {
             )
         }
 
-        val tag = recorder.networkTag.ifBlank { "Unknown" }
+        // 文件按日期命名（entry_ip_<日期>.json，每天一份）：标签层砍掉后（推送行只带 #国家，
+        // 见 OptimizedEntry.toWorkerLine），日期是唯一还能区分历史入选结果的维度；
+        // 跨网络的对比靠 runs.jsonl 的逐轮摘要。
+        val day = stamp.format(Date()).substringBefore('T')
         val payload = JSONObject().apply {
             put("generated_at", stamp.format(Date()))
-            put("net_name", tag)
             put("count", nodes.length())
             put("nodes", nodes)
         }
 
-        writeAtomically(File(directory, "entry_ip_$tag.json"), payload.toString(2))
+        writeAtomically(File(directory, "entry_ip_$day.json"), payload.toString(2))
     }
 
     private fun appendRunSummary(recorder: CfRunRecorder, outcome: Outcome?, startedAtMs: Long) {
@@ -375,7 +374,7 @@ class CfOptimizerRunLog(context: Context) {
         const val RUNS_FILE = "runs.jsonl"
         const val CANDIDATES_FILE = "candidates.csv"
 
-        /** 入选结果文件前缀（`entry_ip_<网络标签>.json`，与原脚本 `Output/entry_ip_*.json` 同名式）。 */
+        /** 入选结果文件前缀（`entry_ip_<日期>.json`，与原脚本 `Output/entry_ip_*.json` 同名式）。 */
         const val ENTRY_PREFIX = "entry_ip_"
 
         /** 导出时最多带出几份入选结果（按修改时间取最新）。 */

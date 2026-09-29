@@ -71,19 +71,21 @@ data class OptimizedEntry(
     val score: Double,
 ) {
     /**
-     * 输出 Worker ADD.txt 行，格式 `IP:port#REGION-[networkTag]`；
-     * IPv6 地址规范为 `[IPv6]:port#REGION-[networkTag]`，IPv4 无方括号。
+     * 推送行：`IP:port#国家`（如 `141.164.35.4:443#KR`）。
      *
-     * @throws IllegalArgumentException networkTag 为空或含注入字符（仅允许字母/数字/`-`/`_`/`.`）。
+     * 国家来自探测 trace 的权威定位；解析不出（trace 失败）时回 `ZZ` 占位，不猜。
+     *
+     * 2026-09-29 前是 `#国家-ISP标签`：ISP 靠四级回退解析（Worker /whoami → ipwho.is →
+     * ip-api.com → 传输类型），任何一级失败都会污染输出 —— 实测出过 `#TW-__DOCTYPE_html_`
+     * （Worker 首页 HTML 被当成 ISP 名，清洗后逐字符拼成这个）。标签的真实信息量为 0
+     * （同一轮全部相同），原版要它只为公开分享时按运营商分发名单；单机场景 `#国家` 已够，
+     * 整层砍掉（IspTag / IspTagResolver / transportTag 已删）。升级触发：要把输出分享给
+     * 不同运营商用户时再加回（且只用 Worker /whoami 一级，成功判据必须是 JSON）。
      */
-    fun toWorkerLine(networkTag: String): String {
-        val tag = networkTag.trim()
-        require(tag.isNotEmpty() && tag.all { it.isLetterOrDigit() || it == '-' || it == '_' || it == '.' }) {
-            "invalid network tag"
-        }
+    fun toWorkerLine(): String {
         val reg = region.trim().uppercase()
         val safeRegion = if (reg.length == 2 && reg.all { it in 'A'..'Z' }) reg else "ZZ"
         val host = if (address.contains(':')) "[$address]" else address
-        return "$host:$port#$safeRegion-$tag"
+        return "$host:$port#$safeRegion"
     }
 }

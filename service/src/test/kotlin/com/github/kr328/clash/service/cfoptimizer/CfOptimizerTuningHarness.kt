@@ -57,6 +57,7 @@ fun main() {
     check("memoryMaxSize 默认 5000", CfOptimizerTuning.memoryMaxSize(null) == 5000)
     check("memoryHourBuckets 默认 4", CfOptimizerTuning.memoryHourBuckets(null) == 4)
     check("memoryPoolLimit 默认 100", CfOptimizerTuning.memoryPoolLimit(null) == 100)
+    check("minIntervalHours 默认 6", CfOptimizerTuning.minIntervalHours(null) == 6)
 
     // ---- 2. 空串/空白/非法值 → 回落默认（设置页允许清空，清空 = 恢复默认）----
     check("空串 → 默认", CfOptimizerTuning.tcpConcurrency("") == 400)
@@ -79,6 +80,10 @@ fun main() {
     check("rawPoolFactor 50 → 夹到 10", CfOptimizerTuning.rawPoolFactor("50") == 10)
     check("memoryPoolLimit 0 合法（= 不复测历史）", CfOptimizerTuning.memoryPoolLimit("0") == 0)
     check("memoryPoolLimit -3 → 夹到 0", CfOptimizerTuning.memoryPoolLimit("-3") == 0)
+    check("minIntervalHours 0 合法（= 不节流）", CfOptimizerTuning.minIntervalHours("0") == 0)
+    check("minIntervalHours -1 → 夹到 0", CfOptimizerTuning.minIntervalHours("-1") == 0)
+    check("minIntervalHours 1000 → 夹到 168", CfOptimizerTuning.minIntervalHours("1000") == 168)
+    check("minIntervalHours 非法 → 默认", CfOptimizerTuning.minIntervalHours("abc") == 6)
     check("maxPerRegion 0 合法（= 不限地区）", CfOptimizerTuning.maxPerRegion("0") == 0)
     check("maxPerRegion 999 → 夹到 50", CfOptimizerTuning.maxPerRegion("999") == 50)
     check("downloadEarlyStopMbps 0.1 → 夹到 1.0", CfOptimizerTuning.downloadEarlyStopMbps("0.1") == 1.0)

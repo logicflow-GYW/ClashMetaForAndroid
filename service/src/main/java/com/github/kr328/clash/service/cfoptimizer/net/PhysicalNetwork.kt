@@ -61,20 +61,4 @@ object PhysicalNetwork {
     fun openConnection(context: Context, url: URL): URLConnection =
         openConnection(pick(context), url)
 
-    /** 人类可读的网络类型标签（WiFi / Cellular / DefaultNet），用于 Worker 行的 `#REGION-[tag]`。 */
-    fun transportTag(context: Context, network: Network?): String {
-        if (network == null) return DEFAULT_TAG
-
-        val connectivity = context.getSystemService<ConnectivityManager>() ?: return DEFAULT_TAG
-        val caps = connectivity.getNetworkCapabilities(network) ?: return DEFAULT_TAG
-
-        return when {
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "WiFi"
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Cellular"
-            else -> DEFAULT_TAG
-        }
-    }
-
-    /** 探测网络不可用时的兜底标签。 */
-    const val DEFAULT_TAG: String = "DefaultNet"
 }

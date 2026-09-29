@@ -20,9 +20,6 @@ object CfQualityGate {
     /** 数据就绪线：有真实延迟（>0）的节点至少占三成 —— 全是 0 多半是还没测过，不是劣化。 */
     const val TESTED_TENTHS: Int = 3
 
-    /** 节流：距上次优选不足这个小时数一律不触发。 */
-    const val MIN_INTERVAL_HOURS: Long = 6
-
     /** 最少样本：节点太少时占比不可信。 */
     const val MIN_SAMPLES: Int = 4
 
@@ -35,12 +32,22 @@ object CfQualityGate {
 
     /**
      * [delays] = 当前 profile 全部节点的延迟（去重后），0 = 失联/未测；
-     * [lastRunAt] = 上次优选完成时间（epoch ms，0 = 从未跑过）。
+     * [lastRunAt] = 上次优选完成时间（epoch ms，0 = 从未跑过）；
+     * [minIntervalHours] = 节流时长（小时，由调用方传入 —— 生产从设置读，
+     * 默认值的单一来源是 CfOptimizerTuning.MIN_INTERVAL_HOURS_DEFAULT；
+     * **0（或任何非正值）= 不节流**）。
      */
-    fun shouldRun(delays: List<Int>, lastRunAt: Long, now: Long): Verdict {
+    fun shouldRun(
+        delays: List<Int>,
+        lastRunAt: Long,
+        now: Long,
+        minIntervalHours: Long,
+    ): Verdict {
         if (delays.size < MIN_SAMPLES) return Verdict(false, "too_few_proxies")
 
-        if (now - lastRunAt < MIN_INTERVAL_HOURS * HOUR_MS) return Verdict(false, "throttled")
+        if (minIntervalHours > 0 && now - lastRunAt < minIntervalHours * HOUR_MS) {
+            return Verdict(false, "throttled")
+        }
 
         val tested = delays.count { it > 0 }
         if (tested * 10 < delays.size * TESTED_TENTHS) return Verdict(false, "data_not_ready")
