@@ -52,20 +52,28 @@ jobs:
           sudo update-ca-certificates
           cp -f /etc/ssl/certs/ca-certificates.crt core/src/foss/golang/clash/component/ca/ca-certificates.crt
 
-      # - name: Signing properties
-      #   env:
-      #     SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-      #     SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-      #     SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
-      #   run: |
-      #     touch signing.properties
-      #     echo keystore.password="$SIGNING_STORE_PASSWORD" > signing.properties
-      #     echo key.alias="$SIGNING_KEY_ALIAS" >> signing.properties
-      #     echo key.password="$SIGNING_KEY_PASSWORD" >> signing.properties
-            
-      #     echo "cat signing.properties"
-      #     cat signing.properties
+      - name: Signing properties
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          # 缺 secret 时必须红：没有 signing.properties 时 Gradle 会静默回退到
+          # 每次 runner 现场生成的 debug key —— APK 照样产出、照样能装，但每次构建签名都不同，
+          # 装新版本必须先卸载旧的（已实测：debug 证书 valid-from 比构建早 1 分 40 秒）。
+          # 宁可在这里失败，也不要静默产出一个签名不稳定的可安装包。
+          if [ -z "$SIGNING_STORE_PASSWORD" ] || [ -z "$SIGNING_KEY_ALIAS" ] || [ -z "$SIGNING_KEY_PASSWORD" ]; then
+            echo "::error::签名 secret 缺失 —— 拒绝回退到 debug key 签名"
+            exit 1
+          fi
 
+          touch signing.properties
+          echo keystore.password="$SIGNING_STORE_PASSWORD" > signing.properties
+          echo key.alias="$SIGNING_KEY_ALIAS" >> signing.properties
+          echo key.password="$SIGNING_KEY_PASSWORD" >> signing.properties
+
+          echo "cat signing.properties"
+          cat signing.properties
       - name: Build
         if: success()
         run: ./gradlew --no-daemon app:assembleAlphaRelease
@@ -74,7 +82,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{  success() }}
         with:
-          name: CMFA Debug Unsigned APK (universal) 
+          name: CMFA Alpha APK (signed) (universal) 
           path: |
             app/build/outputs/apk/alpha/release/*-universal-*.apk
       
@@ -82,7 +90,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{  success() }}
         with:
-          name: CMFA Debug Unsigned APK (arm64-v8a)
+          name: CMFA Alpha APK (signed) (arm64-v8a)
           path: |
             app/build/outputs/apk/alpha/release/*-arm64-v8a-*.apk
       
@@ -90,7 +98,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{  success() }}
         with:
-          name: CMFA Debug Unsigned APK (armeabi-v7a)
+          name: CMFA Alpha APK (signed) (armeabi-v7a)
           path: |
             app/build/outputs/apk/alpha/release/*-armeabi-v7a-*.apk
       
@@ -98,7 +106,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{  success() }}
         with:
-          name: CMFA Debug Unsigned APK (x86_64)
+          name: CMFA Alpha APK (signed) (x86_64)
           path: |
             app/build/outputs/apk/alpha/release/*-x86_64-*.apk
       
@@ -106,6 +114,6 @@ jobs:
         uses: actions/upload-artifact@v7
         if: ${{  success() }}
         with:
-          name: CMFA Debug Unsigned APK (x86)
+          name: CMFA Alpha APK (signed) (x86)
           path: |
             app/build/outputs/apk/alpha/release/*-x86-*.apk
