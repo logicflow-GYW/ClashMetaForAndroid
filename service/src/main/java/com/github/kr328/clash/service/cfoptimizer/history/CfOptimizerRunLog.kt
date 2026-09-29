@@ -97,7 +97,7 @@ class CfOptimizerRunLog(context: Context) {
 
         val copied = mutableListOf<File>()
 
-        listOf(candidatesFile, runsFile, File(directory, CfMemoryStore.FILE_NAME)).forEach { source ->
+        exportableFiles().forEach { source ->
             if (!source.isFile) return@forEach
 
             runCatching {
@@ -109,6 +109,23 @@ class CfOptimizerRunLog(context: Context) {
         }
 
         return copied
+    }
+
+    /**
+     * 可导出文件集合 = 固定三份（候选明细 / 每轮摘要 / 记忆库）+ 最新的若干份入选结果。
+     *
+     * `entry_ip_<网络标签>.json` 是按网络命名的，用户每换一次网络就多一份；全量带出会让
+     * 分享面板被几十个文件塞满，所以只带最近修改的 [MAX_EXPORTED_ENTRIES] 份。
+     * ponytail: 只按时间取最新的几份 | 天花板: 需要跨网络对比历史入选结果时看不到旧的 | 升级触发: 用户反馈要对比多网络的历史结果
+     */
+    private fun exportableFiles(): List<File> {
+        val entries = directory
+            .listFiles { file -> file.isFile && file.name.startsWith(ENTRY_PREFIX) && file.name.endsWith(".json") }
+            ?.sortedByDescending { it.lastModified() }
+            ?.take(MAX_EXPORTED_ENTRIES)
+            .orEmpty()
+
+        return listOf(candidatesFile, runsFile, File(directory, CfMemoryStore.FILE_NAME)) + entries
     }
 
     /** 外部导出目录（UI 提示用；可能尚未创建）。 */
@@ -238,6 +255,12 @@ class CfOptimizerRunLog(context: Context) {
     companion object {
         const val RUNS_FILE = "runs.jsonl"
         const val CANDIDATES_FILE = "candidates.csv"
+
+        /** 入选结果文件前缀（`entry_ip_<网络标签>.json`，与原脚本 `Output/entry_ip_*.json` 同名式）。 */
+        const val ENTRY_PREFIX = "entry_ip_"
+
+        /** 导出时最多带出几份入选结果（按修改时间取最新）。 */
+        const val MAX_EXPORTED_ENTRIES = 3
 
         /** 历史摘要保留的轮数上限（每行约 200 字节，200 行 ≈ 40 KB）。 */
         const val MAX_RUN_LINES = 200

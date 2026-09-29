@@ -367,4 +367,8 @@
     <string name="cf_optimizer_data_summary_value">Память: %1$d узлов · %2$d запусков</string>
     <string name="cf_optimizer_export_done">Экспортировано файлов: %1$d в\n%2$s</string>
     <string name="cf_optimizer_export_empty">Пока нечего экспортировать —— сначала запустите оптимизацию</string>
+    <string name="cf_optimizer_share">Поделиться данными</string>
+    <string name="cf_optimizer_share_summary">Отправить экспортированные файлы в другое приложение</string>
+    <string name="cf_optimizer_share_title">Поделиться данными оптимизации CF</string>
+    <string name="cf_optimizer_share_failed">Не удалось поделиться: %1$s</string>
 </resources>
