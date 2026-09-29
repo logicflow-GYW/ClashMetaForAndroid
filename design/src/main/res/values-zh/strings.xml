@@ -323,4 +323,9 @@
     <string name="cf_optimizer_share_summary">把导出的文件发给别的应用（聊天 / 网盘 / 邮件）</string>
     <string name="cf_optimizer_share_title">分享 CF 优选数据</string>
     <string name="cf_optimizer_share_failed">分享失败：%1$s</string>
+    <string name="cf_optimizer_params_entry_summary">筛选、配额与行为，全部可调；留空使用默认值</string>
+    <string name="cf_optimizer_group_filter">筛选</string>
+    <string name="cf_optimizer_group_quota">配额与并发</string>
+    <string name="cf_optimizer_group_behavior">行为</string>
+    <string name="cf_optimizer_group_manual">手动条目</string>
 </resources>

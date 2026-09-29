@@ -192,6 +192,11 @@
             android:exported="false"
             android:label="@string/cf_optimizer" />
         <activity
+            android:name=".CfOptimizerParamsActivity"
+            android:configChanges="uiMode"
+            android:exported="false"
+            android:label="@string/cf_optimizer_params" />
+        <activity
             android:name=".AccessControlActivity"
             android:configChanges="uiMode"
             android:exported="false"

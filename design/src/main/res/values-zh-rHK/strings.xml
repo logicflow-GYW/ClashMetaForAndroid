@@ -304,4 +304,9 @@
     <string name="cf_optimizer_share_summary">把匯出的檔案發給其他應用（聊天 / 網盤 / 郵件）</string>
     <string name="cf_optimizer_share_title">分享 CF 優選資料</string>
     <string name="cf_optimizer_share_failed">分享失敗：%1$s</string>
+    <string name="cf_optimizer_params_entry_summary">篩選、配額與行為，全部可調；留空使用預設值</string>
+    <string name="cf_optimizer_group_filter">篩選</string>
+    <string name="cf_optimizer_group_quota">配額與並發</string>
+    <string name="cf_optimizer_group_behavior">行為</string>
+    <string name="cf_optimizer_group_manual">手動條目</string>
 </resources>

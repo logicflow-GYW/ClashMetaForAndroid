@@ -307,4 +307,9 @@
     <string name="cf_optimizer_share_summary">내보낸 파일을 다른 앱으로 보내기(채팅 / 클라우드 / 메일)</string>
     <string name="cf_optimizer_share_title">CF 최적화 데이터 공유</string>
     <string name="cf_optimizer_share_failed">공유 실패: %1$s</string>
+    <string name="cf_optimizer_params_entry_summary">필터링, 할당량, 동작을 모두 조정할 수 있습니다. 비워 두면 기본값이 사용됩니다</string>
+    <string name="cf_optimizer_group_filter">필터링</string>
+    <string name="cf_optimizer_group_quota">할당량 및 동시성</string>
+    <string name="cf_optimizer_group_behavior">동작</string>
+    <string name="cf_optimizer_group_manual">수동 항목</string>
 </resources>

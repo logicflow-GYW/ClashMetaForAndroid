@@ -36,6 +36,11 @@ class CfOptimizerSettingsActivity : BaseActivity<CfOptimizerSettingsDesign>() {
 
                 design.requests.onReceive {
                     when (it) {
+                        CfOptimizerSettingsDesign.Request.OpenParams -> {
+                            startActivity(
+                                Intent(this, CfOptimizerParamsActivity::class.java),
+                            )
+                        }
                         CfOptimizerSettingsDesign.Request.RunCfOptimizer -> {
                             CfOptimizerSettingsStore(this@CfOptimizerSettingsActivity).lastRunAt =
                                 System.currentTimeMillis()

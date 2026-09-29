@@ -12,12 +12,12 @@
     <string name="tun_stack_mips">Mips</string>
     <string name="tun_stack_mode">Chế độ xếp chồng dữ liệu</string>
     <string name="tun_stack_system">Hệ thống</string>
-    <string name="application_name_alpha">ClashPilot Alpha</string>
+    <string name="application_name_alpha">ClashPilot</string>
     <string name="application_name_meta">ClashPilot</string>
     <string name="clash_meta_core">Clash Meta Core</string>
     <string name="clash_meta_for_android">Clash Meta</string>
     <string name="clash_meta_wiki">Clash Meta Wiki</string>
-    <string name="launch_name_alpha">ClashPilot Alpha</string>
+    <string name="launch_name_alpha">ClashPilot</string>
     <string name="launch_name_meta">ClashPilot</string>
     <string name="_new">Mới</string>
     <string name="about">Thông tin</string>
@@ -294,4 +294,9 @@
     <string name="cf_optimizer_share_summary">Gửi các tệp đã xuất sang ứng dụng khác</string>
     <string name="cf_optimizer_share_title">Chia sẻ dữ liệu tối ưu CF</string>
     <string name="cf_optimizer_share_failed">Chia sẻ thất bại: %1$s</string>
+    <string name="cf_optimizer_params_entry_summary">Lọc, hạn mức và hành vi — tất cả đều có thể điều chỉnh; giá trị trống dùng mặc định</string>
+    <string name="cf_optimizer_group_filter">Lọc</string>
+    <string name="cf_optimizer_group_quota">Hạn mức và song song</string>
+    <string name="cf_optimizer_group_behavior">Hành vi</string>
+    <string name="cf_optimizer_group_manual">Mục thủ công</string>
 </resources>
