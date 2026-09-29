@@ -36,14 +36,6 @@ object CfCandidateSource {
     private const val CONNECT_TIMEOUT_MS: Int = 5_000
     private const val READ_TIMEOUT_MS: Int = 10_000
 
-    /** Cloudflare 官方 IPv4 网段（与 cf_config.CF_CIDR_LIST 一致，静态常量 + 附理由）。 */
-    private val CF_V4_PREFIXES: List<Pair<Long, Int>> = listOf(
-        "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
-        "141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
-        "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
-        "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
-    ).mapNotNull { parseCidr(it) }
-
     /** Cloudflare 支持的入口端口（与引擎白名单一致，双保险）。 */
     private val ALLOWED_PORTS: Set<Int> =
         setOf(80, 8080, 8880, 2052, 2082, 2086, 2095, 443, 2053, 2083, 2087, 2096, 8443)
@@ -79,7 +71,6 @@ object CfCandidateSource {
                 .map { it.substringBefore('#').trim() }
                 .mapNotNull(::parseLine)
                 .distinctBy { it.address to it.port }
-                .filter { isInCfRange(it.address) }
                 .toList()
 
             return parsed.shuffled(Random(System.nanoTime())).take(MAX_CANDIDATES)
@@ -109,26 +100,6 @@ object CfCandidateSource {
 
         return !(addr.isSiteLocalAddress || addr.isLoopbackAddress || addr.isMulticastAddress ||
                 addr.isAnyLocalAddress || addr.isLinkLocalAddress)
-    }
-
-    private fun isInCfRange(address: String): Boolean {
-        val addr = runCatching { InetAddress.getByName(address) }.getOrNull() ?: return false
-        val value = toLong(addr.address) ?: return false
-
-        return CF_V4_PREFIXES.any { (network, prefix) ->
-            val mask = if (prefix == 0) 0L else (-1L shl (32 - prefix))
-            (value and mask) == (network and mask)
-        }
-    }
-
-    private fun parseCidr(cidr: String): Pair<Long, Int>? {
-        val parts = cidr.split("/")
-        if (parts.size != 2) return null
-
-        val addr = runCatching { InetAddress.getByName(parts[0]) }.getOrNull() ?: return null
-        val prefix = parts[1].toIntOrNull() ?: return null
-
-        return (toLong(addr.address) ?: return null) to prefix
     }
 
     private fun toLong(bytes: ByteArray): Long? {
