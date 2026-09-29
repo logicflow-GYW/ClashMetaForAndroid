@@ -5,7 +5,7 @@ import android.content.Intent
 import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.core.Clash
 import com.github.kr328.clash.core.model.ProxySort
-import com.github.kr328.clash.service.cfoptimizer.CfOptimizerIntents
+import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerIntents
 import com.github.kr328.clash.service.cfoptimizer.quality.CfQualityGate
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsStore
 import kotlinx.coroutines.delay
