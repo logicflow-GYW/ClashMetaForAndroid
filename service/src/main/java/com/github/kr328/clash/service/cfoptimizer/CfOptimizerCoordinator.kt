@@ -47,29 +47,63 @@ class CfOptimizerCoordinator(private val context: Context) {
             return Result(0, 0, false, "password_missing", false, null)
         }
 
-        // 1. 拉取候选（固定来源 + CF 网段校验 + 有界）。
+        // 1. 源发现（导航站 → 缓存 → 内置兜底）+ 拉取候选。
+        val state = StateStore(context)
+        val discovered = try {
+            CfCandidateSource.discoverSourceUrls()
+        } catch (e: Exception) {
+            emptyList()
+        }
+        if (discovered.isNotEmpty()) {
+            state.saveSourceUrls(discovered)
+        }
+
+        val sources = CfCandidateSource.BUILTIN_SOURCE_URLS +
+                (discovered.ifEmpty { state.cachedSourceUrls() }).shuffled()
+                    .take(CfCandidateSource.SOURCES_PER_RUN)
+
         val candidates = try {
-            CfCandidateSource.fetch()
+            CfCandidateSource.fetchFrom(sources)
         } catch (e: Exception) {
             return Result(0, 0, false, "candidates_${e.javaClass.simpleName}", false, null)
         }
 
-        if (candidates.isEmpty()) {
+        // 1.5 记忆库优先节点（原版第一层 priority_ips 的 App 等价物）：上轮成功写入
+        //     Worker 的节点本轮优先复测——即使源抽样没抽到它们，稳的节点不丢。
+        val lastGood = state.lastKnownGood()
+        val lastGoodCandidates = lastGood.mapNotNull { line ->
+            parseWorkerLine(line)?.let { CandidateIp(it.first, it.second, source = "lastgood") }
+        }.filter { lg -> candidates.none { it.address == lg.address && it.port == lg.port } }
+
+        val allCandidates = lastGoodCandidates + candidates
+
+        if (allCandidates.isEmpty()) {
             return Result(0, 0, false, "no_candidates", false, null)
         }
 
         // 2. 物理网络探测（绑定 Network 的 socket，绕开本应用 VPN）。
         val probe = CfProbe(context)
-        val metrics = probe.measure(candidates)
+        val metrics = probe.measure(allCandidates)
+
+        // 2.5 国家黑名单权威过滤：trace loc 在黑名单（网络封锁国家）的候选不进评分/上传。
+        //     与原版 EXCLUDE_COUNTRIES 应用位置一致（trace 阶段）；后缀预过滤已在候选源做。
+        val probed = allCandidates.filter { cand ->
+            metrics[cand]?.let { it.region.uppercase() !in EXCLUDED_TRACE_REGIONS } ?: true
+        }
 
         // 3. 引擎评分。下载测速本轮默认关：metrics.downloadMbps 全为 0，
         //    评分只含 TTFB 分量（上限 60），门槛分按 30/60 比例折半为 15，
         //    排序仍由 TTFB 主导，不因关闭下载而把所有候选拦在门外。
-        val limits = OptimizerLimits(minScore = DOWNLOAD_OFF_MIN_SCORE)
-        val ranked = CfOptimizerEngine.rank(candidates, metrics, limits)
+        //    maxPerRegion=2（原版 SMART_PUSH_IPS_PER_CC）：防单地区垄断 Worker 列表。
+        val limits = OptimizerLimits(minScore = DOWNLOAD_OFF_MIN_SCORE, maxPerRegion = 2)
+        var ranked = CfOptimizerEngine.rank(probed, metrics, limits)
+
+        // 3.5 CIDR /24 前缀去重（原版 cidr_seen 语义）：同一 /24 只保留最高分，
+        //     让 Worker 列表分散在不同网段；去重后不足质量门则不上传。
+        ranked = dedupeByPrefix(ranked)
 
         if (ranked.size < MIN_UPLOAD_ENTRIES) {
-            return Result(candidates.size, ranked.size, false, "below_quality_gate", false, null)
+            return Result(allCandidates.size, ranked.size, false, "below_quality_gate", false, null)
         }
 
         // 4. 组装 Worker 列表：用户自定义静态行在前（与原脚本 custom_add.txt 语义一致），
@@ -108,6 +142,32 @@ class CfOptimizerCoordinator(private val context: Context) {
         return Result(candidates.size, ranked.size, true, null, profileUpdated, profileError)
     }
 
+    /**
+     * 解析 Worker 行 `IP:port#tag` 回 (address, port)——用于把 last-known-good 节点
+     * 还原成候选（原版记忆库优先节点的等价物）。
+     */
+    private fun parseWorkerLine(line: String): Pair<String, Int>? {
+        val entry = line.substringBefore('#').trim()
+        val match = Regex("""^(\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5})$""").find(entry) ?: return null
+
+        return match.groupValues[1] to (match.groupValues[2].toIntOrNull() ?: return null)
+    }
+
+    /**
+     * CIDR /24 前缀去重（原版 cidr_seen 语义）：同一 /24 网段只保留排名最高的条目，
+     * 让 Worker 列表分散在不同网段。解析失败的行保留（不因 tag 格式抖动丢结果）。
+     */
+    private fun dedupeByPrefix(ranked: List<OptimizedEntry>): List<OptimizedEntry> {
+        val seen = HashSet<String>()
+
+        return ranked.filter { entry ->
+            val octets = entry.address.split('.')
+            val prefix = if (octets.size == 4) octets.take(3).joinToString(".") else null
+
+            prefix == null || seen.add(prefix)
+        }
+    }
+
     /** 只刷新用户绑定的那一个 URL Profile，走现有 ProfileProcessor 校验/原子替换/重载链。 */
     private suspend fun updateProfile(uuid: UUID) {
         ProfileProcessor.update(context, uuid, null)
@@ -140,6 +200,13 @@ class CfOptimizerCoordinator(private val context: Context) {
 
         /** 探测网络不可用时的兜底标签。 */
         const val DEFAULT_TAG: String = "DefaultNet"
+
+        /**
+         * 探测地区黑名单（与原版 EXCLUDE_COUNTRIES = {"RU","KP","CN","HK"} 同值）：
+         * trace loc 命中的候选不进评分/上传。trace 失败（region 缺失）的候选保留——
+         * 未知 ≠ 封锁，不因 trace 抖动把整轮清空。
+         */
+        val EXCLUDED_TRACE_REGIONS: Set<String> = setOf("RU", "KP", "CN", "HK")
     }
 }
 
@@ -166,11 +233,25 @@ class StateStore(context: Context) {
             ?.filter { it.isNotBlank() }
             ?: emptyList()
 
+    /** 上轮发现的动态源链接（原版 Data/latest_urls.txt 通讯录缓存的 App 等价物）。 */
+    fun saveSourceUrls(urls: List<String>) {
+        preferences.edit()
+            .putString(KEY_SOURCE_URLS, urls.joinToString("\n"))
+            .apply()
+    }
+
+    fun cachedSourceUrls(): List<String> =
+        preferences.getString(KEY_SOURCE_URLS, null)
+            ?.split('\n')
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
+
     fun lastSuccessAt(): Long = preferences.getLong(KEY_LAST_SUCCESS_AT, 0L)
 
     companion object {
         private const val STATE_FILE = "cfoptimizer_state"
         private const val KEY_LAST_KNOWN_GOOD = "last_known_good"
         private const val KEY_LAST_SUCCESS_AT = "last_success_at"
+        private const val KEY_SOURCE_URLS = "source_urls"
     }
 }
