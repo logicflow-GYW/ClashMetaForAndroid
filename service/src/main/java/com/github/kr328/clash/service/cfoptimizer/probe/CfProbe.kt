@@ -62,6 +62,55 @@ class CfProbe(private val context: Context) {
         }
 
     /**
+     * TCP 连通预筛 —— 漏斗第一段（原版 `MAX_TCP_WORKERS=500` / `TCP_TIMEOUT≈1s` 的手机端等价物）。
+     *
+     * 只做 `connect`：不握手、不发 HTTP。死 IP 的代价从"3 次完整 TLS+HTTP × [CONNECT_TIMEOUT_MS]"
+     * 压到"1 次 connect × [TCP_PROBE_TIMEOUT_MS]"。
+     *
+     * 为什么这一段敢给 [TCP_PROBE_CONCURRENCY] 而 TTFB 段只给 [PROBE_CONCURRENCY]：
+     * connect 不占 TLS 栈、不做证书校验、失败快；TTFB 要握手 + 传输，并发越高越容易在移动网络上
+     * 排队、把尾延迟测歪。两类操作的单价差一个数量级，就不该共用一个并发数。
+     *
+     * 返回**保序**的存活子集（调用方依赖顺序做"记忆池在前"的截断）。
+     * 网络不可用或候选为空时原样返回 —— 探测设施异常不该把整轮清空。
+     */
+    suspend fun filterTcpReachable(
+        candidates: List<CandidateIp>,
+        onProgress: suspend (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): List<CandidateIp> =
+        withContext(Dispatchers.IO) {
+            val network = primaryNetwork() ?: return@withContext candidates
+
+            if (candidates.isEmpty()) return@withContext candidates
+
+            val semaphore = Semaphore(TCP_PROBE_CONCURRENCY)
+            var done = 0
+
+            coroutineScope {
+                candidates.map { candidate ->
+                    async {
+                        semaphore.withPermit {
+                            val reachable = runCatching { tcpReachable(network, candidate) }.getOrDefault(false)
+
+                            synchronized(Unit) { done += 1 }
+                            runCatching { onProgress(done, candidates.size) }
+
+                            candidate.takeIf { reachable }
+                        }
+                    }
+                }.awaitAll().filterNotNull()
+            }
+        }
+
+    /** 单次 TCP connect（超时/拒绝都算不可达）。socket 由物理网络工厂创建，路由不经本应用 TUN。 */
+    private fun tcpReachable(network: Network, candidate: CandidateIp): Boolean =
+        network.socketFactory.createSocket().use { socket ->
+            socket.connect(InetSocketAddress(candidate.address, candidate.port), TCP_PROBE_TIMEOUT_MS)
+
+            true
+        }
+
+    /**
      * 探测单个候选：3 次 TTFB 采样 + 一次地区 trace。
      * 失败返回 null（该候选本轮无指标，引擎会丢弃）。
      */
@@ -311,6 +360,21 @@ class CfProbe(private val context: Context) {
 
         /** 采样间隔（毫秒）。原脚本 100ms。 */
         const val SAMPLE_GAP_MS: Long = 100
+
+        /**
+         * TCP 预筛并发。原版 `MAX_TCP_WORKERS=500`；这里取 200，理由：
+         * ①纯 connect 不占 TLS 栈、失败快，单价远低于 TTFB；
+         * ②每个并发都是一个真实 fd（200 ≈ 200 fd，仍在常规进程上限内）；
+         * ③再高会撞移动网络的连接表与 radio 排队，收益递减。
+         * 2000 个候选在 1s 超时下 ≈ 10 秒筛完（原版 3000 / 500 ≈ 6 秒，同一量级）。
+         */
+        const val TCP_PROBE_CONCURRENCY: Int = 200
+
+        /**
+         * TCP 预筛超时（毫秒）。原版 `TCP_TIMEOUT=1s`：黑洞地址靠它兜底，不给第二次机会
+         * —— 漏斗的意义就是把"确认它是死的"这件事做便宜。
+         */
+        const val TCP_PROBE_TIMEOUT_MS: Int = 1_000
 
         /**
          * 探测并发硬上限。原脚本 50 workers，Android 端取 12：

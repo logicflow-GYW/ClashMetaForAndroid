@@ -199,6 +199,15 @@ fun main() {
         orderMetrics, OptimizerLimits(maxEntries = 2))
     check("maxEntries=2 truncates to 2", truncated.size == 2 && truncated[0].address == "5.6.7.8")
 
+    // ---- 10. 两层配额（便宜层上限 = 昂贵层 × 10，硬上限 20000）----
+    check("rawPoolLimit(300) = 3000", CfOptimizerEngine.rawPoolLimit(300) == 3000)
+    check("rawPoolLimit(80) = 800", CfOptimizerEngine.rawPoolLimit(80) == 800)
+    check("rawPoolLimit(2000) = 20000（正好在上限）", CfOptimizerEngine.rawPoolLimit(2000) == 20000)
+    check("rawPoolLimit(5000) = 20000（被硬上限夹住）", CfOptimizerEngine.rawPoolLimit(5000) == 20000)
+    check("rawPoolLimit(0) = 10（非法输入只放行不放大）", CfOptimizerEngine.rawPoolLimit(0) == 10)
+    check("rawPoolLimit(-5) = 10（负数同样只放行不放大）", CfOptimizerEngine.rawPoolLimit(-5) == 10)
+    check("rawPoolLimit 单调不减", CfOptimizerEngine.rawPoolLimit(1) <= CfOptimizerEngine.rawPoolLimit(300))
+
     println("TOTAL=$total FAILURES=$failures")
     if (failures > 0) kotlin.system.exitProcess(1)
 }
