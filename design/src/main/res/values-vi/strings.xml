@@ -290,4 +290,8 @@
     <string name="cf_optimizer_data_summary_value">Bộ nhớ: %1$d nút · %2$d lần chạy</string>
     <string name="cf_optimizer_export_done">Đã xuất %1$d tệp tới\n%2$s</string>
     <string name="cf_optimizer_export_empty">Chưa có dữ liệu để xuất —— hãy chạy tối ưu một lần trước</string>
+    <string name="cf_optimizer_share">Chia sẻ dữ liệu chạy</string>
+    <string name="cf_optimizer_share_summary">Gửi các tệp đã xuất sang ứng dụng khác</string>
+    <string name="cf_optimizer_share_title">Chia sẻ dữ liệu tối ưu CF</string>
+    <string name="cf_optimizer_share_failed">Chia sẻ thất bại: %1$s</string>
 </resources>

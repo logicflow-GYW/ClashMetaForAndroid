@@ -300,4 +300,8 @@
     <string name="cf_optimizer_data_summary_value">記憶庫 %1$d 個節點 · 已記錄 %2$d 輪</string>
     <string name="cf_optimizer_export_done">已匯出 %1$d 個檔案到\n%2$s</string>
     <string name="cf_optimizer_export_empty">暫無可匯出的資料 —— 先跑一輪優選</string>
+    <string name="cf_optimizer_share">分享執行資料</string>
+    <string name="cf_optimizer_share_summary">把匯出的檔案發給其他應用（聊天 / 網盤 / 郵件）</string>
+    <string name="cf_optimizer_share_title">分享 CF 優選資料</string>
+    <string name="cf_optimizer_share_failed">分享失敗：%1$s</string>
 </resources>

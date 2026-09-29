@@ -38,6 +38,20 @@
         android:theme="@style/BootstrapTheme"
         tools:ignore="GoogleAppIndexingWarning"
         tools:targetApi="N">
+        <!--
+          CF 优选「导出运行数据」的文件出口：只暴露 files/cfoptimizer/ 一个子目录
+          （见 res/xml/cfoptimizer_paths.xml）。authority 带 ${applicationId}，
+          保证稳定版 / alpha / meta / 自定义包名各变体互不冲突。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.cfoptimizer.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/cfoptimizer_paths" />
+        </provider>
         <meta-data
             android:name="releaseName"
             android:value="@string/release_name" />

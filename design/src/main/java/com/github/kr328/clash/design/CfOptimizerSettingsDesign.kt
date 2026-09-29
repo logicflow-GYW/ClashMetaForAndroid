@@ -1,7 +1,11 @@
 package com.github.kr328.clash.design
 
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.view.View
+import androidx.core.content.FileProvider
 import com.github.kr328.clash.design.databinding.DesignSettingsCfOptimizerBinding
 import com.github.kr328.clash.design.dialog.requestModelTextInput
 import com.github.kr328.clash.design.preference.*
@@ -186,6 +190,13 @@ class CfOptimizerSettingsDesign(
                 summary = R.string.cf_optimizer_data_summary,
             )
 
+            // 分享运行数据：同一个导出目录，走系统分享面板发出去 ——
+            // 发给聊天窗口 / 网盘 / 邮件都能直接落成文件，不必再接线 adb 或文件管理器。
+            val sharePref = clickable(
+                title = R.string.cf_optimizer_share,
+                summary = R.string.cf_optimizer_share_summary,
+            )
+
             // CF optimizer initial summaries — never echo the password value.
             launch(Dispatchers.Main) {
                 val baseUrl = withContext(Dispatchers.IO) { cfSettings.workerBaseUrl }
@@ -315,6 +326,51 @@ class CfOptimizerSettingsDesign(
                 }
             }
 
+            // 分享运行数据：把刚导出的那几个文件一次性交给系统分享面板。
+            // 走 FileProvider 的 content:// URI（file:// 在 API 24+ 会直接抛 FileUriExposedException），
+            // authority 与 app/manifest 里注册的一致，只暴露 files/cfoptimizer/ 一个子目录。
+            sharePref.clicked {
+                launch(Dispatchers.Main) {
+                    val exported = withContext(Dispatchers.IO) {
+                        CfOptimizerRunLog(context).exportToExternalStorage()
+                    }
+
+                    if (exported.isEmpty()) {
+                        showToast(R.string.cf_optimizer_export_empty, ToastDuration.Long)
+
+                        return@launch
+                    }
+
+                    runCatching {
+                        val authority = context.packageName + FILE_PROVIDER_SUFFIX
+                        val uris = exported.map { file -> FileProvider.getUriForFile(context, authority, file) }
+
+                        val send = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                            type = "*/*"
+                            putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+
+                        val chooser = Intent.createChooser(
+                            send,
+                            context.getString(R.string.cf_optimizer_share_title),
+                        ).apply {
+                            // Design 持的是 Context，未必是 Activity —— 那种情况下必须带 NEW_TASK。
+                            if (context !is Activity) {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                        }
+
+                        context.startActivity(chooser)
+                    }.onFailure { error ->
+                        showToast(
+                            context.getString(R.string.cf_optimizer_share_failed, error.javaClass.simpleName),
+                            ToastDuration.Long,
+                        )
+                    }
+                }
+            }
+
             // 运行状态直接写在「立即运行优选」的副标题上 —— 不再单独占一张卡片：
             // 通知栏已经实时显示阶段与进度，页面顶部再放一块既是重复信息，也吃掉一大块留白。
             launch(Dispatchers.Main) {
@@ -394,6 +450,13 @@ class CfOptimizerSettingsDesign(
 
         /** 记忆库/历史摘要的刷新间隔（每 N 拍 ≈ N × 2 秒）：解析 memory.json 不便宜。 */
         const val DATA_REFRESH_EVERY_TICKS: Int = 5
+
+        /**
+         * FileProvider authority 后缀：完整 authority = `<包名>.cfoptimizer.files`，
+         * 与 `app/src/main/AndroidManifest.xml` 里注册的 `${applicationId}.cfoptimizer.files` 对应
+         * （applicationId 含变体后缀，故不能写死包名）。
+         */
+        const val FILE_PROVIDER_SUFFIX = ".cfoptimizer.files"
 
         /**
          * 运行状态过期阈值：前台服务被系统杀掉时 stage 会停在中间态，

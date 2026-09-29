@@ -303,4 +303,8 @@
     <string name="cf_optimizer_data_summary_value">メモリ %1$d ノード · %2$d 回記録</string>
     <string name="cf_optimizer_export_done">%1$d 個のファイルを書き出しました\n%2$s</string>
     <string name="cf_optimizer_export_empty">書き出せるデータがまだありません —— まず一度実行してください</string>
+    <string name="cf_optimizer_share">実行データを共有</string>
+    <string name="cf_optimizer_share_summary">書き出したファイルを他のアプリへ送る（チャット / クラウド / メール）</string>
+    <string name="cf_optimizer_share_title">CF 最適化データを共有</string>
+    <string name="cf_optimizer_share_failed">共有できませんでした：%1$s</string>
 </resources>

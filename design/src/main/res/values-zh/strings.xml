@@ -319,4 +319,8 @@
     <string name="cf_optimizer_data_summary_value">记忆库 %1$d 个节点 · 已记录 %2$d 轮</string>
     <string name="cf_optimizer_export_done">已导出 %1$d 个文件到\n%2$s</string>
     <string name="cf_optimizer_export_empty">暂无可导出的数据 —— 先跑一轮优选</string>
+    <string name="cf_optimizer_share">分享运行数据</string>
+    <string name="cf_optimizer_share_summary">把导出的文件发给别的应用（聊天 / 网盘 / 邮件）</string>
+    <string name="cf_optimizer_share_title">分享 CF 优选数据</string>
+    <string name="cf_optimizer_share_failed">分享失败：%1$s</string>
 </resources>

@@ -410,4 +410,8 @@
     <string name="cf_optimizer_data_summary_value">Memory: %1$d nodes · %2$d runs recorded</string>
     <string name="cf_optimizer_export_done">Exported %1$d file(s) to\n%2$s</string>
     <string name="cf_optimizer_export_empty">Nothing to export yet — run the optimizer once first</string>
+    <string name="cf_optimizer_share">Share run data</string>
+    <string name="cf_optimizer_share_summary">Send the exported files to another app</string>
+    <string name="cf_optimizer_share_title">Share CF optimizer data</string>
+    <string name="cf_optimizer_share_failed">Share failed: %1$s</string>
 </resources>
