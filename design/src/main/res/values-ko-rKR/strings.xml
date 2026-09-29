@@ -273,6 +273,7 @@
     <string name="cf_optimizer_password">업로드 비밀번호</string>
     <string name="cf_optimizer_password_set">설정됨</string>
     <string name="cf_optimizer_password_unset">설정되지 않음</string>
+    <string name="cf_optimizer_password_save_failed">비밀번호 저장 실패</string>
     <string name="cf_optimizer_subscription_profile">바인딩된 구독</string>
     <string name="cf_optimizer_subscription_profile_none">없음</string>
     <string name="cf_optimizer_custom_entries">사용자 지정 정적 항목</string>

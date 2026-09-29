@@ -337,6 +337,7 @@
     <string name="cf_optimizer_password">Пароль для загрузки</string>
     <string name="cf_optimizer_password_set">Задан</string>
     <string name="cf_optimizer_password_unset">Не задан</string>
+    <string name="cf_optimizer_password_save_failed">Не удалось сохранить пароль</string>
     <string name="cf_optimizer_subscription_profile">Привязанная подписка</string>
     <string name="cf_optimizer_subscription_profile_none">Нет</string>
     <string name="cf_optimizer_custom_entries">Пользовательские статические строки</string>

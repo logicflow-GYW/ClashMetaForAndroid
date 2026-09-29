@@ -273,6 +273,7 @@
     <string name="cf_optimizer_password">アップロードパスワード</string>
     <string name="cf_optimizer_password_set">設定済み</string>
     <string name="cf_optimizer_password_unset">未設定</string>
+    <string name="cf_optimizer_password_save_failed">パスワードの保存に失敗しました</string>
     <string name="cf_optimizer_subscription_profile">紐付けするサブスクリプション</string>
     <string name="cf_optimizer_subscription_profile_none">なし</string>
     <string name="cf_optimizer_custom_entries">カスタム静的エントリ</string>

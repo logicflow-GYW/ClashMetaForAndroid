@@ -260,6 +260,7 @@
     <string name="cf_optimizer_password">Mật khẩu tải lên</string>
     <string name="cf_optimizer_password_set">Đã đặt</string>
     <string name="cf_optimizer_password_unset">Chưa đặt</string>
+    <string name="cf_optimizer_password_save_failed">Lưu mật khẩu thất bại</string>
     <string name="cf_optimizer_subscription_profile">Đăng ký liên kết</string>
     <string name="cf_optimizer_subscription_profile_none">Không có</string>
     <string name="cf_optimizer_custom_entries">Mục tĩnh tùy chỉnh</string>

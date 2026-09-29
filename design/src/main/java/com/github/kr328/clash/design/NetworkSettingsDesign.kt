@@ -255,7 +255,17 @@ class NetworkSettingsDesign(
                     )
 
                     if (!text.isNullOrEmpty()) {
-                        withContext(Dispatchers.IO) { secrets.setPassword(text) }
+                        try {
+                            withContext(Dispatchers.IO) { secrets.setPassword(text) }
+                        } catch (e: Exception) {
+                            // Never crash the screen on a failed secret write — surface it.
+                            launch {
+                                showToast(
+                                    R.string.cf_optimizer_password_save_failed,
+                                    ToastDuration.Long
+                                )
+                            }
+                        }
                     }
 
                     val configured = withContext(Dispatchers.IO) { secrets.passwordConfigured() }
