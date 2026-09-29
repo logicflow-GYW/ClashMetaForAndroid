@@ -16,4 +16,9 @@
     <string name="provider_files">외부 리소스 파일</string>
     <string name="profile_updater">구성 파일 업데이트</string>
     <string name="profile_updating">구성 파일 업데이트 중</string>
+    <!-- CF optimizer (integration module) -->
+    <string name="cf_optimizer_service">CF 최적화</string>
+    <string name="cf_optimizer_result_success">%1$d개 노드를 최적화하고 업로드했습니다</string>
+    <string name="cf_optimizer_result_failure">CF 최적화 실패: %1$s</string>
+    <string name="cf_optimizer_result_profile_failed">목록은 업로드됨, 구성 파일 업데이트 실패: %1$s</string>
 </resources>

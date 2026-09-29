@@ -16,4 +16,9 @@
     <string name="provider_files">外部リソースファイル</string>
     <string name="profile_updater">プロファイルの更新</string>
     <string name="profile_updating">プロファイルを更新中</string>
+    <!-- CF optimizer (integration module) -->
+    <string name="cf_optimizer_service">CF オプティマイザー</string>
+    <string name="cf_optimizer_result_success">ノードを %1$d 個最適化し、アップロードしました</string>
+    <string name="cf_optimizer_result_failure">CF オプティマイザー失敗: %1$s</string>
+    <string name="cf_optimizer_result_profile_failed">リストはアップロード済み、プロファイル更新に失敗: %1$s</string>
 </resources>
