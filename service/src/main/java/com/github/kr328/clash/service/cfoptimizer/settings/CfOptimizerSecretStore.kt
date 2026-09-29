@@ -65,7 +65,8 @@ class KeystoreCfOptimizerSecretStore(context: Context) : CfOptimizerSecretStore 
         preferences.contains(KEY_CIPHERTEXT)
 
     override fun setPassword(plain: String) {
-        val encrypted = AesGcm.encrypt(loadKey(), plain.toByteArray(Charsets.UTF_8))
+        val key = loadKey() ?: throw IllegalStateException("AndroidKeyStore unavailable")
+        val encrypted = AesGcm.encrypt(key, plain.toByteArray(Charsets.UTF_8))
         val encoded = Base64.encodeToString(encrypted, Base64.NO_WRAP)
 
         preferences.edit().putString(KEY_CIPHERTEXT, encoded).apply()
@@ -86,7 +87,11 @@ class KeystoreCfOptimizerSecretStore(context: Context) : CfOptimizerSecretStore 
         }
 
         val plain = try {
-            AesGcm.decrypt(loadKey(), blob)
+            val key = loadKey() ?: run {
+                // Keystore unavailable — treat as unrecoverable.
+                null
+            }
+            key?.let { AesGcm.decrypt(it, blob) }
         } catch (e: Exception) {
             // Keystore unavailable or key lost — treat as unrecoverable.
             null
