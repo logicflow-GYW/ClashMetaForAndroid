@@ -121,35 +121,35 @@ class CfOptimizerSettingsStore(context: Context) {
     val perSourceSample: Int get() = perSourceSampleRaw.toIntOrNull() ?: 250
 
     /**
-     * 每轮进入 TTFB 探测的候选上限（**昂贵层**，默认 300）。
+     * 每轮进入 TTFB 探测的候选上限（**昂贵层**，默认 600）。
      *
-     * 只作用在 TCP 存活集上：原始池 = 本值 × [CfOptimizerEngine.RAW_POOL_FACTOR]（10），
-     * 即默认 300 → 原始池 3000、TCP 存活率 10% 时正好填满这一层。
+     * 只作用在 TCP 存活集上：原始池 = 本值 × [CfOptimizerEngine.RAW_POOL_FACTOR]（2），
+     * 即默认 600 → 原始池 1200，存活率 71.4%（原版真机实测）时约 850 个存活，探 600（覆盖约 70%）。
      * 旧默认 80 之所以"选不出东西"，是因为它同时也是原始池上限 —— 探索面只有 80 条，
      * 而其中大部分还是死的；漏斗把"确认死 IP"的成本压下去之后，探索面才谈得上放大。
      */
     var maxCandidatesRaw: String by store.string(
         key = "cfoptimizer_max_candidates",
-        defaultValue = "300",
+        defaultValue = "600",
     )
 
-    val maxCandidates: Int get() = maxCandidatesRaw.toIntOrNull() ?: 300
+    val maxCandidates: Int get() = maxCandidatesRaw.toIntOrNull() ?: 600
 
-    /** 上传质量门（原版 SMART_PUSH_MIN_NODES=2；这里默认 5 防侥幸覆盖共享列表）。 */
+    /** 上传质量门（原版 `SMART_PUSH_MIN_NODES`；真机日志一轮推了 8 个）。默认 6：与原版产出规模相称，仍留着"太少就宁可不动共享列表"的保护。 */
     var minUploadEntriesRaw: String by store.string(
         key = "cfoptimizer_min_upload_entries",
-        defaultValue = "5",
+        defaultValue = "6",
     )
 
-    val minUploadEntries: Int get() = minUploadEntriesRaw.toIntOrNull() ?: 5
+    val minUploadEntries: Int get() = minUploadEntriesRaw.toIntOrNull() ?: 6
 
-    /** 每地区最多保留条数（原版 SMART_PUSH_IPS_PER_CC=2）。 */
+    /** 每地区最多保留条数（原版 `SMART_PUSH_IPS_PER_CC`；真机日志实测每地区贡献 4 个、合计 8 个）。取 3：介于我们原默认 2 与原版实测 4 之间。 */
     var maxPerRegionRaw: String by store.string(
         key = "cfoptimizer_max_per_region",
-        defaultValue = "2",
+        defaultValue = "3",
     )
 
-    val maxPerRegion: Int get() = maxPerRegionRaw.toIntOrNull() ?: 2
+    val maxPerRegion: Int get() = maxPerRegionRaw.toIntOrNull() ?: 3
 
     /**
      * 下载测速（默认开）：对 TTFB 最优的窄池测吞吐，补上评分里占 40% 的带宽分量。

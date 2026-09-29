@@ -200,13 +200,15 @@ fun main() {
     check("maxEntries=2 truncates to 2", truncated.size == 2 && truncated[0].address == "5.6.7.8")
 
     // ---- 10. 两层配额（便宜层上限 = 昂贵层 × 10，硬上限 20000）----
-    check("rawPoolLimit(300) = 3000", CfOptimizerEngine.rawPoolLimit(300) == 3000)
-    check("rawPoolLimit(80) = 800", CfOptimizerEngine.rawPoolLimit(80) == 800)
-    check("rawPoolLimit(2000) = 20000（正好在上限）", CfOptimizerEngine.rawPoolLimit(2000) == 20000)
-    check("rawPoolLimit(5000) = 20000（被硬上限夹住）", CfOptimizerEngine.rawPoolLimit(5000) == 20000)
-    check("rawPoolLimit(0) = 10（非法输入只放行不放大）", CfOptimizerEngine.rawPoolLimit(0) == 10)
-    check("rawPoolLimit(-5) = 10（负数同样只放行不放大）", CfOptimizerEngine.rawPoolLimit(-5) == 10)
-    check("rawPoolLimit 单调不减", CfOptimizerEngine.rawPoolLimit(1) <= CfOptimizerEngine.rawPoolLimit(300))
+    // 期望值写死：RAW_POOL_FACTOR 于 2026-09-29 由 10 改为 2（依据原版真机日志实测的 71.4% TCP 存活率，
+    // 见 CfOptimizerEngine.RAW_POOL_FACTOR 的注释）。改动因子就**应该**打红这里 —— 这是刻意的。
+    check("rawPoolLimit(600) = 1200", CfOptimizerEngine.rawPoolLimit(600) == 1200)
+    check("rawPoolLimit(80) = 160", CfOptimizerEngine.rawPoolLimit(80) == 160)
+    check("rawPoolLimit(10000) = 20000（正好在上限）", CfOptimizerEngine.rawPoolLimit(10000) == 20000)
+    check("rawPoolLimit(5000) = 10000（未到上限）", CfOptimizerEngine.rawPoolLimit(5000) == 10000)
+    check("rawPoolLimit(0) = 2（非法输入只放行不放大）", CfOptimizerEngine.rawPoolLimit(0) == 2)
+    check("rawPoolLimit(-5) = 2（负数同样只放行不放大）", CfOptimizerEngine.rawPoolLimit(-5) == 2)
+    check("rawPoolLimit 单调不减", CfOptimizerEngine.rawPoolLimit(1) <= CfOptimizerEngine.rawPoolLimit(600))
 
     println("TOTAL=$total FAILURES=$failures")
     if (failures > 0) kotlin.system.exitProcess(1)
