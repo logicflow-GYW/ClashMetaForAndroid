@@ -264,4 +264,22 @@
     <string name="override_destination">Override Destination</string>
     <string name="import_from_qr_no_permission">카메라 접근이 제한되었습니다. 설정에서 허용해 주세요.</string>
     <string name="import_from_qr_exception">처리되지 않은 시스템 예외가 발생했습니다.</string>
+    <string name="cf_optimizer">CF 최적화</string>
+    <string name="cf_optimizer_enable">CF 최적화 사용</string>
+    <string name="cf_optimizer_enable_summary">Cloudflare 후보 IP를 최적화하고 구독을 자동으로 유지합니다</string>
+    <string name="cf_optimizer_worker_base_url">Worker 주소</string>
+    <string name="cf_optimizer_not_set">설정되지 않음</string>
+    <string name="cf_optimizer_url_invalid">HTTPS 주소만 허용됩니다</string>
+    <string name="cf_optimizer_password">업로드 비밀번호</string>
+    <string name="cf_optimizer_password_set">설정됨</string>
+    <string name="cf_optimizer_password_unset">설정되지 않음</string>
+    <string name="cf_optimizer_subscription_profile">바인딩된 구독</string>
+    <string name="cf_optimizer_subscription_profile_none">없음</string>
+    <string name="cf_optimizer_custom_entries">사용자 지정 정적 항목</string>
+    <string name="cf_optimizer_scan_on_network_change">네트워크 변경 시 스캔</string>
+    <string name="cf_optimizer_scan_on_network_change_summary">네트워크 변경 시 후보 IP를 다시 스캔합니다. 기본값은 꺼짐입니다.</string>
+    <string name="cf_optimizer_run_now">지금 최적화 실행</string>
+    <string name="cf_optimizer_run_now_summary">후보 IP를 측정하고 Worker 공유 목록을 업데이트합니다</string>
+    <string name="cf_optimizer_shared_list_title">공유 목록 확인</string>
+    <string name="cf_optimizer_shared_list_message">Worker의 ADD.txt 목록은 동일한 Worker를 사용하는 모든 기기와 구독에서 공유됩니다. 최적화를 실행하면 이 기기의 결과로 덮어씁니다.</string>
 </resources>

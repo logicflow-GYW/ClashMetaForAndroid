@@ -371,4 +371,22 @@
     <string name="shortcut_start_long">Start Clash service</string>
     <string name="shortcut_stop_short">Stop Clash</string>
     <string name="shortcut_stop_long">Stop Clash service</string>
+    <string name="cf_optimizer">CF optimizer</string>
+    <string name="cf_optimizer_enable">Enable CF optimizer</string>
+    <string name="cf_optimizer_enable_summary">Optimize Cloudflare candidate IPs and keep the subscription up to date</string>
+    <string name="cf_optimizer_worker_base_url">Worker address</string>
+    <string name="cf_optimizer_not_set">Not set</string>
+    <string name="cf_optimizer_url_invalid">Only HTTPS origins are allowed</string>
+    <string name="cf_optimizer_password">Upload password</string>
+    <string name="cf_optimizer_password_set">Set</string>
+    <string name="cf_optimizer_password_unset">Not set</string>
+    <string name="cf_optimizer_subscription_profile">Bound subscription</string>
+    <string name="cf_optimizer_subscription_profile_none">None</string>
+    <string name="cf_optimizer_custom_entries">Custom static entries</string>
+    <string name="cf_optimizer_scan_on_network_change">Scan on network change</string>
+    <string name="cf_optimizer_scan_on_network_change_summary">Automatically rescan candidate IPs when the network changes. Disabled by default.</string>
+    <string name="cf_optimizer_run_now">Run optimizer now</string>
+    <string name="cf_optimizer_run_now_summary">Probe candidates and update the Worker shared list</string>
+    <string name="cf_optimizer_shared_list_title">Shared list confirmation</string>
+    <string name="cf_optimizer_shared_list_message">The Worker ADD.txt list is shared across all devices and subscriptions using this Worker. Running the optimizer will overwrite it with this device\'s results.</string>
 </resources>
