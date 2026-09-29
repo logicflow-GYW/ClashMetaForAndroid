@@ -31,7 +31,7 @@ import javax.net.ssl.SSLSocket
  * TLS 用系统默认 trust manager + SNI `cp.cloudflare.com`，证书校验完整——
  * 不照搬 Python 脚本的 `ssl=False`。
  */
-class CfProbe(private val context: Context) {
+class CfProbe(private val context: Context, private val config: CfProbeConfig = CfProbeConfig()) {
     /** HTTP 探测目标 host（SNI/Host 头）。 */
     private val probeHost: String = PROBE_HOST
 
@@ -41,7 +41,7 @@ class CfProbe(private val context: Context) {
     ): Map<CandidateIp, ProbeMetrics> =
         withContext(Dispatchers.IO) {
             val network = primaryNetwork() ?: return@withContext emptyMap()
-            val semaphore = Semaphore(PROBE_CONCURRENCY)
+            val semaphore = Semaphore(config.probeConcurrency)
             var done = 0
 
             coroutineScope {
@@ -65,9 +65,10 @@ class CfProbe(private val context: Context) {
      * TCP 连通预筛 —— 漏斗第一段（原版 `MAX_TCP_WORKERS=500` / `TCP_TIMEOUT≈1s` 的手机端等价物）。
      *
      * 只做 `connect`：不握手、不发 HTTP。死 IP 的代价从"3 次完整 TLS+HTTP × [CONNECT_TIMEOUT_MS]"
-     * 压到"1 次 connect × [TCP_PROBE_TIMEOUT_MS]"。
+     * 压到"1 次 connect × [CfProbeConfig.tcpTimeoutMs]"。
      *
-     * 为什么这一段敢给 [TCP_PROBE_CONCURRENCY] 而 TTFB 段只给 [PROBE_CONCURRENCY]：
+     * 为什么这一段敢给 [CfProbeConfig.tcpConcurrency] 而 TTFB 段只给
+     * [CfProbeConfig.probeConcurrency]：
      * connect 不占 TLS 栈、不做证书校验、失败快；TTFB 要握手 + 传输，并发越高越容易在移动网络上
      * 排队、把尾延迟测歪。两类操作的单价差一个数量级，就不该共用一个并发数。
      *
@@ -83,7 +84,7 @@ class CfProbe(private val context: Context) {
 
             if (candidates.isEmpty()) return@withContext candidates
 
-            val semaphore = Semaphore(TCP_PROBE_CONCURRENCY)
+            val semaphore = Semaphore(config.tcpConcurrency)
             var done = 0
 
             coroutineScope {
@@ -105,7 +106,7 @@ class CfProbe(private val context: Context) {
     /** 单次 TCP connect（超时/拒绝都算不可达）。socket 由物理网络工厂创建，路由不经本应用 TUN。 */
     private fun tcpReachable(network: Network, candidate: CandidateIp): Boolean =
         network.socketFactory.createSocket().use { socket ->
-            socket.connect(InetSocketAddress(candidate.address, candidate.port), TCP_PROBE_TIMEOUT_MS)
+            socket.connect(InetSocketAddress(candidate.address, candidate.port), config.tcpTimeoutMs)
 
             true
         }
@@ -118,13 +119,13 @@ class CfProbe(private val context: Context) {
         val https = candidate.port in HTTPS_PORTS
 
         val samples = mutableListOf<Long>()
-        repeat(TTFB_SAMPLES) {
+        repeat(config.ttfbSamples) {
             val elapsed = runCatching {
                 timedGet(network, candidate.address, candidate.port, https, "/generate_204?ed=2560", setOf(200, 204))
             }.getOrNull()
 
             if (elapsed != null) samples.add(elapsed.first)
-            if (samples.size < TTFB_SAMPLES) kotlinx.coroutines.delay(SAMPLE_GAP_MS)
+            if (samples.size < config.ttfbSamples) kotlinx.coroutines.delay(SAMPLE_GAP_MS)
         }
 
         // 与原脚本口径一致：>=2 样本取中位数 + 全距抖动；仅 1 样本时无抖动数据（jitter 记 0，
@@ -153,8 +154,8 @@ class CfProbe(private val context: Context) {
      * 下载测速（原版 `speed.cloudflare.com/__down` 语义）：给 TTFB 已通过的候选补上吞吐指标，
      * 让评分里占 40% 的带宽分量真正参与排序（此前该分量恒为 0，等于只按 TTFB 选节点）。
      *
-     * 只对窄池做：调用方（协调器）传 TTFB 最优的 [DOWNLOAD_POOL_LIMIT] 个候选，
-     * 单次最多读 [DOWNLOAD_MAX_BYTES]、最长 [DOWNLOAD_MAX_MILLIS]，速率达标提前收工。
+     * 只对窄池做：调用方（协调器）传 TTFB 最优的 [CfProbeConfig.downloadPoolLimit] 个候选，
+     * 单次最多读 [CfProbeConfig.downloadMaxBytes]、最长 [CfProbeConfig.downloadTimeoutMs]，速率达标提前收工。
      *
      * 返回 `候选 -> Mbps`；失败候选不出现在结果里 —— 协调器保留其 TTFB 分量（带宽记 0），
      * 不编造带宽，也不因为测速失败丢掉本来可用的节点。
@@ -164,7 +165,7 @@ class CfProbe(private val context: Context) {
         onProgress: suspend (done: Int, total: Int) -> Unit = { _, _ -> },
     ): Map<CandidateIp, Double> = withContext(Dispatchers.IO) {
         val network = primaryNetwork() ?: return@withContext emptyMap()
-        val semaphore = Semaphore(DOWNLOAD_CONCURRENCY)
+        val semaphore = Semaphore(config.downloadConcurrency)
         var done = 0
 
         coroutineScope {
@@ -203,7 +204,7 @@ class CfProbe(private val context: Context) {
 
             val output = io.getOutputStream()
             output.write(
-                ("GET $DOWNLOAD_PATH HTTP/1.1\r\n" +
+                ("GET ${config.downloadPath} HTTP/1.1\r\n" +
                         "Host: $DOWNLOAD_HOST\r\n" +
                         "User-Agent: $USER_AGENT\r\n" +
                         "Connection: close\r\n\r\n").toByteArray(Charsets.UTF_8)
@@ -217,16 +218,18 @@ class CfProbe(private val context: Context) {
             val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
             var bytes = 0L
 
-            while (bytes < DOWNLOAD_MAX_BYTES) {
-                val want = minOf(buffer.size.toLong(), DOWNLOAD_MAX_BYTES - bytes).toInt()
+            while (bytes < config.downloadMaxBytes) {
+                val want = minOf(buffer.size.toLong(), config.downloadMaxBytes - bytes).toInt()
                 val read = input.read(buffer, 0, want)
                 if (read < 0) break
 
                 bytes += read
 
                 val elapsedMs = (System.nanoTime() - start) / 1_000_000
-                if (elapsedMs >= DOWNLOAD_MAX_MILLIS) break
-                if (elapsedMs >= DOWNLOAD_EARLY_STOP_MIN_MILLIS && mbpsOf(bytes, elapsedMs) >= DOWNLOAD_EARLY_STOP_MBPS) {
+                if (elapsedMs >= config.downloadTimeoutMs) break
+                if (elapsedMs >= DOWNLOAD_EARLY_STOP_MIN_MILLIS &&
+                    mbpsOf(bytes, elapsedMs) >= config.downloadEarlyStopMbps
+                ) {
                     break
                 }
             }
@@ -349,42 +352,22 @@ class CfProbe(private val context: Context) {
     fun candidateNetworks(): List<Network> = PhysicalNetwork.candidates(context)
 
     companion object {
+        /**
+         * 这里只留**不可调**的固定项（协议端点、端口组、读写缓冲）。
+         *
+         * 可调参数（并发 / 超时 / 采样次数 / 测速大小与早停）已集中到
+         * [CfOptimizerTuning]（默认值与取值范围）与 [CfProbeConfig]（本轮生效值快照），
+         * 理由与实测依据随默认值写在那边 —— 单一来源，避免两处各说一套。
+         */
+
         /** 探测目标 host（Cloudflare anycast 入口，SNI/Host 一致）。 */
         const val PROBE_HOST: String = "cp.cloudflare.com"
 
         /** Cloudflare HTTPS 端口组（与引擎/来源白名单一致）。 */
         private val HTTPS_PORTS: Set<Int> = setOf(443, 8443, 2053, 2083, 2087, 2096)
 
-        /** TTFB 采样次数（与原脚本一致：3 次，中位数 + 全距抖动）。 */
-        const val TTFB_SAMPLES: Int = 3
-
         /** 采样间隔（毫秒）。原脚本 100ms。 */
         const val SAMPLE_GAP_MS: Long = 100
-
-        /**
-         * TCP 预筛并发。原版 `MAX_TCP_WORKERS=500`（真机日志实测自适应到 485→500）。
-         *
-         * 取 400 = 原版稳态的 80%：原版有 PID 自整定 + 10% 均值回归兜底，我们的默认值是静态的，
-         * 留 20% 余量补这个差。原版在**同一台手机**上以 500 并发 7 秒筛完 6397 个候选，
-         * 所以 400 不是猜的：纯 connect 不占 TLS 栈、失败快，单价远低于 TTFB。
-         */
-        const val TCP_PROBE_CONCURRENCY: Int = 400
-
-        /**
-         * TCP 预筛超时（毫秒）。原版 `TCP_TIMEOUT=1s`，真机日志里自整定到 0.86–0.88s。
-         * 黑洞地址靠它兜底，不给第二次机会 —— 漏斗的意义就是把"确认它是死的"这件事做便宜。
-         * 900ms 对 300–400ms RTT 的真实节点仍有余量。
-         */
-        const val TCP_PROBE_TIMEOUT_MS: Int = 900
-
-        /**
-         * 探测并发硬上限（原版 TTFB workers 真机日志实测 54→57）。
-         *
-         * 取 40 = 原版稳态的约 70%：这里是完整 TLS 握手 + HTTP 请求，比 TCP connect 重，
-         * 且每个候选要排 3 次采样。原版同机 1008 个候选 × 3 次采样 76 秒跑完；
-         * 我们 600 个候选在 40 并发下约 45–60 秒，同一量级。
-         */
-        const val PROBE_CONCURRENCY: Int = 40
 
         /** 连接超时（毫秒）。公网 anycast 入口，5s 足够；超时候选本轮无指标。 */
         const val CONNECT_TIMEOUT_MS: Int = 5_000
@@ -395,34 +378,10 @@ class CfProbe(private val context: Context) {
         /** 地区缺失时的占位（不从 IP 反推地理位置）。 */
         const val REGION_FALLBACK: String = "ZZ"
 
-        /** 下载测速 host / 路径（与原脚本一致，走 CF 官方测速端点）。 */
+        /** 下载测速 host（与原脚本一致，走 CF 官方测速端点；路径由 [CfProbeConfig.downloadPath] 推导）。 */
         const val DOWNLOAD_HOST: String = "speed.cloudflare.com"
-        const val DOWNLOAD_PATH: String = "/__down?bytes=3145728"
 
-        /**
-         * 参与下载测速的候选上限：只测 TTFB 最优的这么多（原脚本 TTFB_POOL_LIMIT 语义，原版实测 80→76）。
-         * 取 40：40 × 3MB = 最坏 120MB，但早停线（100 Mbps、最少 1s）会让快节点远低于此，
-         * 典型一轮 30–60MB。移动数据敏感用户可关掉下载测速（排序退化成纯延迟）。
-         */
-        const val DOWNLOAD_POOL_LIMIT: Int = 40
-
-        /** 下载测速并发：比探测低（每个连接都在持续吃带宽，并发高会互相抢）。 */
-        const val DOWNLOAD_CONCURRENCY: Int = 4
-
-        /** 单候选最多读的字节（3MB）—— 足够区分 30 / 150 Mbps 量级，又不至于烧流量。 */
-        const val DOWNLOAD_MAX_BYTES: Long = 3L * 1024 * 1024
-
-        /** 单候选最长测量时间（毫秒）。到点按已读字节数结算。 */
-        const val DOWNLOAD_MAX_MILLIS: Long = 4_000
-
-        /**
-         * 提前收工门槛：至少测 [DOWNLOAD_EARLY_STOP_MIN_MILLIS] 后速率已达标即停。
-         *
-         * 100 Mbps = 评分参考带宽（150）的三分之二：过了这条线，带宽分量已拿到大部分分数，
-         * 再测只烧流量。**不要照抄原版的 30 Mbps** —— 它日志里 33.2/33.0/32.9 密集堆在早停线附近，
-         * 那些读数是下界而非真实带宽，用来排序分不出节点好坏。
-         */
-        const val DOWNLOAD_EARLY_STOP_MBPS: Double = 100.0
+        /** 提前收工的最小测量时长（毫秒）。没测够这么久不判"达标"，防瞬时尖峰误判。 */
         const val DOWNLOAD_EARLY_STOP_MIN_MILLIS: Long = 1_000
 
         /** 读缓冲与响应头上限。 */

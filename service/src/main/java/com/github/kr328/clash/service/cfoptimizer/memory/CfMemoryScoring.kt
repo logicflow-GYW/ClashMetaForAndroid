@@ -62,20 +62,11 @@ data class PriorityCandidate(
  * 不做"优化"：任何偏离都会让两边的记忆库不再等价。
  */
 object CfMemoryScoring {
-    /** 超过此天数未见且无历史成功 → 清除。 */
-    const val STALE_DAYS = 14.0
-
-    /** 超过此天数未见 → avg_score 开始衰减。 */
-    const val DECAY_DAYS = 7.0
-
-    /** 连续失败超过此次数 → 移出优先候选（省探测配额）。 */
-    const val MAX_FAIL_STREAK = 3
-
-    /** 记忆库上限（按置信度淘汰，防无限增长）。 */
-    const val MEMORY_MAX_SIZE = 5000
-
-    /** 一天切成几段（4 = 每 6 小时一段）。 */
-    const val HOUR_BUCKETS = 4
+    /**
+     * 运行参数（超期/衰减/失败阈值/容量/分桶）由 [CfMemoryTuning] 传入，默认值 = 原版常量。
+     * 可调项在设置页，取值范围与理由见 `CfOptimizerTuning`；这里不再存一份常量 ——
+     * 两处各写一套迟早会漂移。
+     */
 
     /** 每个时段桶最多保留的历史得分条数（与原版 `bucket_scores[-10:]` 一致）。 */
     const val BUCKET_SCORES_KEEP = 10
@@ -89,12 +80,16 @@ object CfMemoryScoring {
     private const val SECONDS_PER_DAY = 86_400.0
 
     /** 当前时间落在哪个时段桶（原版用 `time.localtime()`，即本地时区）。 */
-    fun hourBucket(nowSeconds: Long, zone: TimeZone = TimeZone.getDefault()): Int {
+    fun hourBucket(
+        nowSeconds: Long,
+        zone: TimeZone = TimeZone.getDefault(),
+        tuning: CfMemoryTuning = CfMemoryTuning(),
+    ): Int {
         val calendar = Calendar.getInstance(zone)
 
         calendar.timeInMillis = nowSeconds * 1000L
 
-        return calendar.get(Calendar.HOUR_OF_DAY) / (24 / HOUR_BUCKETS)
+        return calendar.get(Calendar.HOUR_OF_DAY) / (24 / tuning.hourBuckets)
     }
 
     /**
@@ -117,6 +112,7 @@ object CfMemoryScoring {
         rangeOk: Boolean = false,
         stage: String = STAGE_FULL,
         zone: TimeZone = TimeZone.getDefault(),
+        tuning: CfMemoryTuning = CfMemoryTuning(),
     ): MemoryRecord {
         var rec = record ?: MemoryRecord.empty(cc, nowSeconds)
 
@@ -128,7 +124,7 @@ object CfMemoryScoring {
 
         when {
             (stage == STAGE_FULL || stage == "ttfb") && passed -> {
-                val bucket = hourBucket(nowSeconds, zone).toString()
+                val bucket = hourBucket(nowSeconds, zone, tuning).toString()
                 val bucketScores = (rec.stageScores[bucket] ?: emptyList()) + score
 
                 rec = rec.copy(
@@ -161,14 +157,15 @@ object CfMemoryScoring {
         record: MemoryRecord,
         nowSeconds: Long,
         bucket: Int,
+        tuning: CfMemoryTuning = CfMemoryTuning(),
     ): Double {
         val daysAgo = (nowSeconds - record.lastSeen) / SECONDS_PER_DAY
 
         val passRate = record.passes.toDouble() / maxOf(record.runs, 1).toDouble()
-        val freshness = maxOf(0.0, 1.0 - daysAgo / STALE_DAYS)
+        val freshness = maxOf(0.0, 1.0 - daysAgo / tuning.staleDays)
         val decayFactor =
-            if (daysAgo > DECAY_DAYS) {
-                maxOf(0.3, 1.0 - (daysAgo - DECAY_DAYS) / (STALE_DAYS - DECAY_DAYS))
+            if (daysAgo > tuning.decayDays) {
+                maxOf(0.3, 1.0 - (daysAgo - tuning.decayDays) / (tuning.staleDays - tuning.decayDays))
             } else {
                 1.0
             }
@@ -188,7 +185,7 @@ object CfMemoryScoring {
     /**
      * 优先复测候选（置信度降序取前 [topN]），原版 `get_priority_candidates` 的等价实现。
      *
-     * 三道过滤：太久没见（> [STALE_DAYS]）、连续失败（≥ [MAX_FAIL_STREAK]）、
+     * 三道过滤：太久没见（> [CfMemoryTuning.staleDays]）、连续失败（≥ [CfMemoryTuning.maxFailStreak]）、
      * 从没成功且 TCP 命中不足 3 次。
      */
     fun priorityCandidates(
@@ -196,13 +193,14 @@ object CfMemoryScoring {
         nowSeconds: Long,
         topN: Int,
         zone: TimeZone = TimeZone.getDefault(),
+        tuning: CfMemoryTuning = CfMemoryTuning(),
     ): List<PriorityCandidate> {
-        val bucket = hourBucket(nowSeconds, zone)
+        val bucket = hourBucket(nowSeconds, zone, tuning)
 
         return db.mapNotNull { (key, record) ->
             val daysAgo = (nowSeconds - record.lastSeen) / SECONDS_PER_DAY
 
-            if (daysAgo > STALE_DAYS || record.failStreak >= MAX_FAIL_STREAK) return@mapNotNull null
+            if (daysAgo > tuning.staleDays || record.failStreak >= tuning.maxFailStreak) return@mapNotNull null
             if (record.passes == 0 && record.tcpHits < 3) return@mapNotNull null
 
             val split = key.lastIndexOf(':')
@@ -211,7 +209,7 @@ object CfMemoryScoring {
             val address = key.substring(0, split)
             val port = key.substring(split + 1).toIntOrNull() ?: return@mapNotNull null
 
-            PriorityCandidate(address, port, record.cc, confidenceOf(record, nowSeconds, bucket))
+            PriorityCandidate(address, port, record.cc, confidenceOf(record, nowSeconds, bucket, tuning))
         }
             .sortedByDescending { it.confidence }
             .take(topN)
@@ -220,17 +218,22 @@ object CfMemoryScoring {
     /**
      * 清除过期/低质量条目，返回删除条数（原版 `prune_stale` 的等价实现）。
      *
-     * 三条规则：14 天未见且从无成功 / 连续失败 ≥6 次且 7 天未见 / 只有 TCP 命中且 7 天未见。
+     * 三条规则：`staleDays` 未见且从无成功 / 连续失败 ≥2×`maxFailStreak` 次且 7 天未见 /
+     * 只有 TCP 命中且 `staleDays`/2 未见。
      */
-    fun pruneStale(db: MutableMap<String, MemoryRecord>, nowSeconds: Long): Int {
+    fun pruneStale(
+        db: MutableMap<String, MemoryRecord>,
+        nowSeconds: Long,
+        tuning: CfMemoryTuning = CfMemoryTuning(),
+    ): Int {
         val doomed = db.filter { (_, record) ->
             val daysAgo = (nowSeconds - record.lastSeen) / SECONDS_PER_DAY
             val tcpOnly = record.passes == 0 && record.tcpHits > 0
 
             when {
-                daysAgo > STALE_DAYS && record.passes == 0 -> true
-                record.failStreak >= MAX_FAIL_STREAK * 2 && daysAgo > 7 -> true
-                tcpOnly && daysAgo > STALE_DAYS / 2 -> true
+                daysAgo > tuning.staleDays && record.passes == 0 -> true
+                record.failStreak >= tuning.maxFailStreak * 2 && daysAgo > 7 -> true
+                tcpOnly && daysAgo > tuning.staleDays / 2 -> true
                 else -> false
             }
         }.keys
@@ -244,17 +247,21 @@ object CfMemoryScoring {
      * 超上限时按置信度淘汰，返回淘汰条数（原版 `save_memory` 内联逻辑的等价实现）。
      * 排序键与原版一致：`avg_score × freshness × (passes > 0)`。
      */
-    fun evictOverflow(db: MutableMap<String, MemoryRecord>, nowSeconds: Long): Int {
-        if (db.size <= MEMORY_MAX_SIZE) return 0
+    fun evictOverflow(
+        db: MutableMap<String, MemoryRecord>,
+        nowSeconds: Long,
+        tuning: CfMemoryTuning = CfMemoryTuning(),
+    ): Int {
+        if (db.size <= tuning.maxSize) return 0
 
         val ranked = db.entries.sortedByDescending { (_, record) ->
             val daysAgo = (nowSeconds - record.lastSeen) / SECONDS_PER_DAY
-            val freshness = maxOf(0.0, 1.0 - daysAgo / STALE_DAYS)
+            val freshness = maxOf(0.0, 1.0 - daysAgo / tuning.staleDays)
 
             record.avgScore * freshness * (if (record.passes > 0) 1.0 else 0.0)
         }
 
-        val keep = ranked.take(MEMORY_MAX_SIZE).map { it.key }.toSet()
+        val keep = ranked.take(tuning.maxSize).map { it.key }.toSet()
         val evicted = db.keys.filter { it !in keep }
 
         evicted.forEach { db.remove(it) }

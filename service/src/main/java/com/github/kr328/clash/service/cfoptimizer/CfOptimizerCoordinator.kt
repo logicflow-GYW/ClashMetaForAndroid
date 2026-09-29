@@ -9,6 +9,7 @@ import com.github.kr328.clash.service.cfoptimizer.memory.CfMemoryStore
 import com.github.kr328.clash.service.cfoptimizer.net.IspTagResolver
 import com.github.kr328.clash.service.cfoptimizer.net.PhysicalNetwork
 import com.github.kr328.clash.service.cfoptimizer.probe.CfProbe
+import com.github.kr328.clash.service.cfoptimizer.probe.CfProbeConfig
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsStore
 import com.github.kr328.clash.service.cfoptimizer.settings.KeystoreCfOptimizerSecretStore
 import com.github.kr328.clash.service.cfoptimizer.source.CfCandidateSource
@@ -98,13 +99,27 @@ class CfOptimizerCoordinator(private val context: Context) {
         val perSourceSample = settingsStore.perSourceSample
         val maxCandidates = settingsStore.maxCandidates
 
+        // 探测 / 测速参数（原版 cf_config.py 的并发、超时、下载大小）：一轮读一次快照、整轮复用 ——
+        // 中途改设置不能让同一轮出现两套并发；探针层只认这份快照，不直接读设置。
+        val probeConfig = CfProbeConfig(
+            tcpConcurrency = settingsStore.tcpConcurrency,
+            tcpTimeoutMs = settingsStore.tcpTimeoutMs,
+            probeConcurrency = settingsStore.probeConcurrency,
+            ttfbSamples = settingsStore.ttfbSamples,
+            downloadPoolLimit = settingsStore.downloadPoolLimit,
+            downloadConcurrency = settingsStore.downloadConcurrency,
+            downloadSizeMb = settingsStore.downloadSizeMb,
+            downloadTimeoutMs = settingsStore.downloadTimeoutMs.toLong(),
+            downloadEarlyStopMbps = settingsStore.downloadEarlyStopMbps,
+        )
+
         // 两层配额（漏斗结构，对齐原版"先便宜后贵"）：
-        //   便宜层 rawPool = maxCandidates × RAW_POOL_FACTOR —— 只付 TCP connect 的价钱（1s 超时、200 并发）；
+        //   便宜层 rawPool = maxCandidates × 倍数（可调，默认 2）—— 只付 TCP connect 的价钱；
         //   昂贵层 maxCandidates —— 3 次 TTFB 采样 + trace + 下载测速，只作用在 TCP 存活集上。
         // 原版 3000 候选之所以"轻松"，正是因为它先花几秒把死 IP 筛掉；删掉漏斗后每个死 IP 都要付
         // 3 次完整 TLS+HTTP 超时（最坏 15 秒），80 个候选就能吃掉两分钟 —— 这才是"选不出来"的真正原因：
         // 探索面被死 IP 的确认成本挤没了。
-        val rawPoolLimit = CfOptimizerEngine.rawPoolLimit(maxCandidates)
+        val rawPoolLimit = CfOptimizerEngine.rawPoolLimit(maxCandidates, settingsStore.rawPoolFactor)
 
         // 阶段墙钟耗时（秒），写进 runs.jsonl：没有它就没法回答"时间花在哪一段"。
         val stageSeconds = LinkedHashMap<String, Double>()
@@ -118,10 +133,12 @@ class CfOptimizerCoordinator(private val context: Context) {
         val maxPerRegion = settingsStore.maxPerRegion
         val downloadTestEnabled = settingsStore.downloadTestEnabled
         val memoryEnabled = settingsStore.memoryEnabled
+        val memoryPoolLimit = settingsStore.memoryPoolLimit
 
         // 跨轮记忆库（原版 cf_memory.py 的 App 等价物）：默认开。
         // 关掉 = 每轮从零开始（原版脚本的默认行为），用于对照实验。
-        val memory = if (memoryEnabled) CfMemoryStore(context) else null
+        // 淘汰/衰减阈值随用户参数走（原版那 5 个常量在设置页可调）。
+        val memory = if (memoryEnabled) CfMemoryStore(context, settingsStore.memoryTuning) else null
 
         // 物理网络出口：本模块**所有** Java 侧网络 I/O（拉源 / 探测 / 上传）统一绑它。
         // 不绑的后果（真机实测）：开着代理时请求回流进本应用 TUN → 被自己的规则送进代理
@@ -167,7 +184,7 @@ class CfOptimizerCoordinator(private val context: Context) {
         // 1.5 优先复测池 = 记忆库置信度 top-N（跨轮历史）+ 上轮写入 Worker 的节点。
         //     记忆库比 last-known-good 更准：它记得谁**稳定**，而不只是谁上一轮在名单里；
         //     置信度含成功率、新鲜度衰减与"当前时段"加成（原版 get_priority_candidates 口径）。
-        val memoryCandidates = memory?.priorities(MEMORY_POOL_LIMIT).orEmpty().mapNotNull { priority ->
+        val memoryCandidates = memory?.priorities(memoryPoolLimit).orEmpty().mapNotNull { priority ->
             val candidate = CandidateIp(priority.address, priority.port, source = "memory")
 
             if (candidates.any { it.address == candidate.address && it.port == candidate.port }) {
@@ -191,13 +208,13 @@ class CfOptimizerCoordinator(private val context: Context) {
         // 这就是探索/利用的权衡点：上一轮稳定节点越可信，本轮越省探测时间。
         val pooled = (memoryCandidates + lastGoodCandidates + freshCandidates)
             .distinctBy { it.address to it.port }
-            .take(rawPoolLimit + MEMORY_POOL_LIMIT)
+            .take(rawPoolLimit + memoryPoolLimit)
 
         if (pooled.isEmpty()) {
             return Result(0, 0, false, "no_candidates", false, null)
         }
 
-        val probe = CfProbe(context)
+        val probe = CfProbe(context, probeConfig)
 
         // 1.7 TCP 连通预筛（漏斗第一段）：死 IP 在这里以"1 次 connect × 1s"的代价淘汰，
         //     只有存活集进昂贵的 TTFB/trace 段。保序 —— 记忆池在最前，截断时天然优先保留。
@@ -211,7 +228,7 @@ class CfOptimizerCoordinator(private val context: Context) {
 
         markStage(STAGE_TCP)
 
-        val allCandidates = tcpAlive.take(maxCandidates + MEMORY_POOL_LIMIT)
+        val allCandidates = tcpAlive.take(maxCandidates + memoryPoolLimit)
 
         if (allCandidates.isEmpty()) {
             return Result(0, 0, false, "no_reachable_candidates", false, null)
@@ -244,7 +261,7 @@ class CfOptimizerCoordinator(private val context: Context) {
             val pool = probed
                 .mapNotNull { candidate -> metrics[candidate]?.let { candidate to it.ttfbMs } }
                 .sortedBy { it.second }
-                .take(CfProbe.DOWNLOAD_POOL_LIMIT)
+                .take(probeConfig.downloadPoolLimit)
                 .map { it.first }
 
             state.saveRunState(STAGE_DOWNLOAD, 0, pool.size)
@@ -268,19 +285,27 @@ class CfOptimizerCoordinator(private val context: Context) {
             }
         }
 
-        // 3. 引擎评分。门槛分随「下载测速开/关」切换量纲：开 = 完整 30 分基线；
-        //    关 = 按 30/60 等比折半为 15，否则会把所有候选拦在门外。
+        // 3. 引擎评分。门槛分用户可调（原版 SMART_PUSH_MIN_SCORE）：关掉下载测速时带宽分量恒为 0、
+        //    满分只剩 60，门槛由 CfOptimizerTuning 按比例折半（否则会把所有候选拦在门外）。
         //    maxPerRegion（原版 SMART_PUSH_IPS_PER_CC）：防单地区垄断 Worker 列表。
         state.saveRunState(STAGE_RANK, probed.size, allCandidates.size)
         onProgress(STAGE_RANK, probed.size, allCandidates.size)
 
-        val minScore = if (downloadTestEnabled) DOWNLOAD_ON_MIN_SCORE else DOWNLOAD_OFF_MIN_SCORE
-        val limits = OptimizerLimits(minScore = minScore, maxPerRegion = maxPerRegion)
+        // maxTtfbMs / maxJitterMs / maxEntries / weights 此前只用了引擎默认值（协调器没传参）──
+        // 引擎本来支持，只是没人把用户值递进去：现在一并接上，默认值与旧行为逐字相同。
+        val limits = OptimizerLimits(
+            maxEntries = settingsStore.maxEntries,
+            maxTtfbMs = settingsStore.maxTtfbMs.toLong(),
+            maxJitterMs = settingsStore.maxJitterMs.toLong(),
+            minScore = settingsStore.effectiveMinScore,
+            maxPerRegion = maxPerRegion,
+            weights = settingsStore.scoreWeights,
+        )
         var ranked = CfOptimizerEngine.rank(probed, scoredMetrics, limits)
 
-        // 3.5 CIDR /24 前缀去重（原版 cidr_seen 语义）：同一 /24 只保留最高分，
+        // 3.5 CIDR 前缀去重（原版 cidr_seen 语义）：同一前缀只保留最高分，
         //     让 Worker 列表分散在不同网段；去重后不足质量门则不上传。
-        ranked = dedupeByPrefix(ranked)
+        ranked = dedupeByPrefix(ranked, settingsStore.dedupPrefixV4)
 
         // 3.7 记忆库写回（原版 record_result）。放在这里而不是"上传成功后"：
         //     质量门不足 / 上传失败的轮次同样长记忆——失败轮恰恰是记忆库最该记住的。
@@ -421,15 +446,19 @@ class CfOptimizerCoordinator(private val context: Context) {
     }
 
     /**
-     * CIDR /24 前缀去重（原版 cidr_seen 语义）：同一 /24 网段只保留排名最高的条目，
+     * CIDR 前缀去重（原版 cidr_seen 语义）：同一前缀网段只保留排名最高的条目，
      * 让 Worker 列表分散在不同网段。解析失败的行保留（不因 tag 格式抖动丢结果）。
+     *
+     * [prefixLength] 用户可调（原版 `IPV4_DEDUP_PREFIX`，默认 24）；非 IPv4 字面量（如 IPv6）
+     * 不做前缀归并 —— 由输入校验决定它们是否还在池子里，不在这里猜。
      */
-    private fun dedupeByPrefix(ranked: List<OptimizedEntry>): List<OptimizedEntry> {
+    private fun dedupeByPrefix(ranked: List<OptimizedEntry>, prefixLength: Int): List<OptimizedEntry> {
         val seen = HashSet<String>()
+        val octetsKept = (prefixLength.coerceIn(8, 32) + 7) / 8
 
         return ranked.filter { entry ->
             val octets = entry.address.split('.')
-            val prefix = if (octets.size == 4) octets.take(3).joinToString(".") else null
+            val prefix = if (octets.size == 4) octets.take(octetsKept).joinToString(".") else null
 
             prefix == null || seen.add(prefix)
         }
@@ -455,23 +484,6 @@ class CfOptimizerCoordinator(private val context: Context) {
 
         /** 探测网络不可用时的兜底标签。 */
         const val DEFAULT_TAG: String = "DefaultNet"
-
-        /**
-         * 每轮从记忆库取多少条优先复测（原版 priority_ips 的 App 等价物）。
-         *
-         * 原版真机日志实测「已加载 100 个记忆库优先节点」。取 100：占昂贵层（默认 600）的六分之一，
-         * 与原版比例相当 —— 稳定节点值得优先复测，但不该把探索新节点的额度挤没。
-         */
-        const val MEMORY_POOL_LIMIT: Int = 100
-
-        /**
-         * 下载测速关闭时的门槛分。契约基线 30 分按「评分上限 60」等比折半——
-         * 关闭下载时评分只含 TTFB 分量，不折半会把所有候选拦在门外。
-         */
-        const val DOWNLOAD_OFF_MIN_SCORE: Double = 15.0
-
-        /** 下载测速开启时的门槛分（完整量纲，与原脚本一致）。 */
-        const val DOWNLOAD_ON_MIN_SCORE: Double = 30.0
     }
 }
 

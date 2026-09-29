@@ -64,7 +64,7 @@ object CfCandidateSource {
     private const val MAX_SOURCE_BYTES: Int = 4 * 1024 * 1024
 
     /**
-     * 每轮候选池上限的默认值（协调器会显式传"便宜层上限"= 昂贵层 × RAW_POOL_FACTOR）。
+     * 每轮候选池上限的默认值（协调器会显式传"便宜层上限"= 昂贵层 × 用户可调的倍数（默认 2））。
      * 这里是**便宜层**语义：只付 TCP connect 的价钱，真正的昂贵段由 maxCandidates 单独封顶。
      */
     const val MAX_CANDIDATES: Int = 300

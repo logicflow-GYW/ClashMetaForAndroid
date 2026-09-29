@@ -33,7 +33,32 @@ data class OptimizerLimits(
      * 主集成会话的现有调用，以默认关闭的可选字段落地，并已在任务回报中声明此偏差。
      */
     val maxPerRegion: Int = 0,
+    /** 评分权重；默认 0.6 / 0.4 与原脚本一致（用户可调，见 CfOptimizerTuning）。 */
+    val weights: ScoreWeights = ScoreWeights(),
 )
+
+/**
+ * 评分权重（TTFB 分量 / 带宽分量）。
+ *
+ * 默认 0.6 / 0.4 = 原脚本 `SCORE_TTFB_WEIGHT` / `SCORE_BW_WEIGHT`。
+ * 不要求两项之和为 1：[CfOptimizerEngine.scoreOf] 按和归一化，满分恒为 100，
+ * 门槛分（0–100 量纲）才不会随权重漂移；两项都为 0 时回落默认（否则候选全军覆没）。
+ */
+data class ScoreWeights(
+    val ttfb: Double = 0.6,
+    val bw: Double = 0.4,
+) {
+    /**
+     * 归一化后的权重（两项之和恒为 1）。和 ≤ 0 或非有限 → 回落默认 0.6 / 0.4 ——
+     * 否则所有候选得分恒为 0，名单会被门槛清空，那不是"调参"，是把自己关在门外。
+     */
+    val normalized: ScoreWeights
+        get() {
+            val sum = ttfb + bw
+            if (!sum.isFinite() || sum <= 0.0) return ScoreWeights()
+            return ScoreWeights(ttfb = ttfb / sum, bw = bw / sum)
+        }
+}
 
 /** 一条优选结果。由 [CfOptimizerEngine.rank] 产出。 */
 data class OptimizedEntry(

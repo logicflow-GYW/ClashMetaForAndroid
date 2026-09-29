@@ -210,7 +210,8 @@ fun main() {
     // ---- 4. 超上限淘汰（按 avg_score × freshness × (passes>0)）----
     val overflow = LinkedHashMap<String, MemoryRecord>()
 
-    repeat(CfMemoryScoring.MEMORY_MAX_SIZE + 3) { index ->
+    // 容量字面量 5000（默认值由 CfOptimizerTuningHarness 断言），不从常量推导。
+    repeat(5000 + 3) { index ->
         overflow["10.0.$index:443"] = MemoryRecord(
             cc = "US", firstSeen = NOW, runs = 1, passes = if (index == 0) 0 else 1, failStreak = 0,
             lastSeen = NOW, lastScore = index.toDouble(), lastTtfbMs = 100.0, lastMbps = 1.0,
@@ -219,7 +220,7 @@ fun main() {
     }
 
     check("超上限淘汰 3 条", CfMemoryScoring.evictOverflow(overflow, NOW) == 3)
-    check("淘汰后正好到上限", overflow.size == CfMemoryScoring.MEMORY_MAX_SIZE)
+    check("淘汰后正好到上限", overflow.size == 5000)
     check("无成功记录者优先被淘汰", "10.0.0:443" !in overflow)
 
     println("================================")
