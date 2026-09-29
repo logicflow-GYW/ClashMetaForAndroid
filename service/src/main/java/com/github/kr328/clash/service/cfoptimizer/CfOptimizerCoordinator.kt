@@ -9,6 +9,7 @@ import com.github.kr328.clash.service.cfoptimizer.memory.CfMemoryStore
 import com.github.kr328.clash.service.cfoptimizer.net.IspTagResolver
 import com.github.kr328.clash.service.cfoptimizer.net.PhysicalNetwork
 import com.github.kr328.clash.service.cfoptimizer.probe.CfProbe
+import com.github.kr328.clash.service.cfoptimizer.probe.CfProbeConfig
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsStore
 import com.github.kr328.clash.service.cfoptimizer.settings.KeystoreCfOptimizerSecretStore
 import com.github.kr328.clash.service.cfoptimizer.source.CfCandidateSource
