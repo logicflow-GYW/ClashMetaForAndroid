@@ -347,4 +347,14 @@
     <string name="cf_optimizer_run_now_summary">Проверить IP-кандидаты и обновить общий список Worker</string>
     <string name="cf_optimizer_shared_list_title">Подтверждение общего списка</string>
     <string name="cf_optimizer_shared_list_message">Список ADD.txt у Worker общий для всех устройств и подписок, использующих этот Worker. Запуск оптимизации перезапишет его результатами этого устройства.</string>
+    <string name="cf_optimizer_params">Параметры запуска</string>
+    <string name="cf_optimizer_exclude_countries">Исключённые страны (через запятую)</string>
+    <string name="cf_optimizer_only_countries">Только эти страны (пусто = выкл.)</string>
+    <string name="cf_optimizer_sources_per_run">Источников за запуск</string>
+    <string name="cf_optimizer_per_source_sample">Образцов на источник</string>
+    <string name="cf_optimizer_max_candidates">Лимит кандидатов</string>
+    <string name="cf_optimizer_min_upload_entries">Порог загрузки</string>
+    <string name="cf_optimizer_max_per_region">Максимум на регион</string>
+    <string name="cf_optimizer_status_title">Статус запуска</string>
+    <string name="cf_optimizer_status_idle">Ещё не запускалось</string>
 </resources>

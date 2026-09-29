@@ -71,6 +71,73 @@ class CfOptimizerSettingsStore(context: Context) {
         defaultValue = 0L,
     )
 
+    // ── 运行参数（模仿原版 cf_config.py，全部带默认值；空/非法时回落默认）──
+    // Raw String 委托供设置页 UI 绑定；typed 计算属性供协调器消费。
+
+    /** 排除国家（原版 EXCLUDE_COUNTRIES）：逗号分隔 ISO 码，默认 RU,KP,CN,HK。 */
+    var excludeCountriesRaw: String by store.string(
+        key = "cfoptimizer_exclude_countries",
+        defaultValue = "RU,KP,CN,HK",
+    )
+
+    val excludeCountries: Set<String>
+        get() = excludeCountriesRaw.split(',', ';')
+            .map { it.trim().uppercase() }
+            .filter { it.length == 2 }
+            .toSet()
+
+    /** 只选国家（原版 ONLY_COUNTRIES）：空 = 不启用白名单。 */
+    var onlyCountriesRaw: String by store.string(
+        key = "cfoptimizer_only_countries",
+        defaultValue = "",
+    )
+
+    val onlyCountries: Set<String>
+        get() = onlyCountriesRaw.split(',', ';')
+            .map { it.trim().uppercase() }
+            .filter { it.length == 2 }
+            .toSet()
+
+    /** 每轮从源池抽取的源数（原版动态通讯录；手机端有界化默认 4）。 */
+    var sourcesPerRunRaw: String by store.string(
+        key = "cfoptimizer_sources_per_run",
+        defaultValue = "4",
+    )
+
+    val sourcesPerRun: Int get() = sourcesPerRunRaw.toIntOrNull() ?: 4
+
+    /** 单源抽样条数（原版 sample_limit 的手机端等比；默认 40）。 */
+    var perSourceSampleRaw: String by store.string(
+        key = "cfoptimizer_per_source_sample",
+        defaultValue = "40",
+    )
+
+    val perSourceSample: Int get() = perSourceSampleRaw.toIntOrNull() ?: 40
+
+    /** 每轮进入探测的候选上限（默认 100）。 */
+    var maxCandidatesRaw: String by store.string(
+        key = "cfoptimizer_max_candidates",
+        defaultValue = "100",
+    )
+
+    val maxCandidates: Int get() = maxCandidatesRaw.toIntOrNull() ?: 100
+
+    /** 上传质量门（原版 SMART_PUSH_MIN_NODES=2；这里默认 3 防侥幸覆盖）。 */
+    var minUploadEntriesRaw: String by store.string(
+        key = "cfoptimizer_min_upload_entries",
+        defaultValue = "3",
+    )
+
+    val minUploadEntries: Int get() = minUploadEntriesRaw.toIntOrNull() ?: 3
+
+    /** 每地区最多保留条数（原版 SMART_PUSH_IPS_PER_CC=2）。 */
+    var maxPerRegionRaw: String by store.string(
+        key = "cfoptimizer_max_per_region",
+        defaultValue = "2",
+    )
+
+    val maxPerRegion: Int get() = maxPerRegionRaw.toIntOrNull() ?: 2
+
     private val customEntriesDelegate by store.string(
         key = "cfoptimizer_custom_entries",
         defaultValue = "",

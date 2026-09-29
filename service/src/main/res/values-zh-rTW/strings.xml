@@ -19,6 +19,10 @@
     <!-- CF optimizer (integration module) -->
     <string name="cf_optimizer_service">CF 優選</string>
     <string name="cf_optimizer_result_success">優選 %1$d 個節點，已上傳成功</string>
+    <string name="cf_optimizer_stage_sources">正在拉取候選源</string>
+    <string name="cf_optimizer_stage_probe">正在探測 %1$d/%2$d</string>
+    <string name="cf_optimizer_stage_rank">正在評分</string>
+    <string name="cf_optimizer_stage_upload">正在上傳到 Worker</string>
     <string name="cf_optimizer_result_failure">CF 優選失敗: %1$s</string>
     <string name="cf_optimizer_result_profile_failed">清單已上傳，設定檔更新失敗: %1$s</string>
 </resources>

@@ -299,4 +299,14 @@
     <string name="cf_optimizer_run_now_summary">测速候选 IP 并更新 Worker 共享列表</string>
     <string name="cf_optimizer_shared_list_title">共享列表确认</string>
     <string name="cf_optimizer_shared_list_message">Worker 的 ADD.txt 列表由使用同一 Worker 的所有设备和订阅共享。运行优选会用本机结果覆盖该列表。</string>
+    <string name="cf_optimizer_params">运行参数</string>
+    <string name="cf_optimizer_exclude_countries">排除国家（逗号分隔）</string>
+    <string name="cf_optimizer_only_countries">只选国家（留空不启用）</string>
+    <string name="cf_optimizer_sources_per_run">每轮源数</string>
+    <string name="cf_optimizer_per_source_sample">单源抽样条数</string>
+    <string name="cf_optimizer_max_candidates">候选上限</string>
+    <string name="cf_optimizer_min_upload_entries">上传门槛</string>
+    <string name="cf_optimizer_max_per_region">每地区上限</string>
+    <string name="cf_optimizer_status_title">运行状态</string>
+    <string name="cf_optimizer_status_idle">尚未运行</string>
 </resources>

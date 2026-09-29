@@ -390,4 +390,14 @@
     <string name="cf_optimizer_run_now_summary">Probe candidates and update the Worker shared list</string>
     <string name="cf_optimizer_shared_list_title">Shared list confirmation</string>
     <string name="cf_optimizer_shared_list_message">The Worker ADD.txt list is shared across all devices and subscriptions using this Worker. Running the optimizer will overwrite it with this device\'s results.</string>
+    <string name="cf_optimizer_params">Run parameters</string>
+    <string name="cf_optimizer_exclude_countries">Excluded countries</string>
+    <string name="cf_optimizer_only_countries">Only these countries</string>
+    <string name="cf_optimizer_sources_per_run">Sources per run</string>
+    <string name="cf_optimizer_per_source_sample">Samples per source</string>
+    <string name="cf_optimizer_max_candidates">Candidate limit</string>
+    <string name="cf_optimizer_min_upload_entries">Upload quality gate</string>
+    <string name="cf_optimizer_max_per_region">Max per region</string>
+    <string name="cf_optimizer_status_title">Run status</string>
+    <string name="cf_optimizer_status_idle">Never run</string>
 </resources>

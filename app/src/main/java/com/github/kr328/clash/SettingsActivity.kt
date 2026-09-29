@@ -27,6 +27,9 @@ class SettingsActivity : BaseActivity<SettingsDesign>() {
                         SettingsDesign.Request.StartMetaFeature ->
                             startActivity(MetaFeatureSettingsActivity::class.intent)
                     }
+                    SettingsDesign.Request.StartCfOptimizer -> {
+                        startActivity(CfOptimizerSettingsActivity::class.intent)
+                    }
                 }
             }
         }

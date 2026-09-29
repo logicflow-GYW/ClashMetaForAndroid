@@ -9,7 +9,9 @@ import com.github.kr328.clash.service.cfoptimizer.source.CfCandidateSource
 import com.github.kr328.clash.service.cfoptimizer.worker.CfWorkerClient
 import com.github.kr328.clash.service.cfoptimizer.worker.CfWorkerSettings
 import com.github.kr328.clash.service.cfoptimizer.worker.WorkerUploadResult
+import kotlinx.coroutines.delay
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
  * CF 优选协调器 — 把候选源、物理网络探测、引擎评分、Worker 上传与订阅刷新串成完整流程。
@@ -31,7 +33,7 @@ class CfOptimizerCoordinator(private val context: Context) {
         val profileError: String?,
     )
 
-    suspend fun run(): Result {
+    suspend fun run(onProgress: suspend (stage: String, progress: Int, total: Int) -> Unit = { _, _, _ -> }): Result {
         val settingsStore = CfOptimizerSettingsStore(context)
         val secretStore = KeystoreCfOptimizerSecretStore(context)
 
@@ -47,8 +49,20 @@ class CfOptimizerCoordinator(private val context: Context) {
             return Result(0, 0, false, "password_missing", false, null)
         }
 
+        // 用户运行参数（模仿原版 cf_config.py，全部可配、空/非法回落默认）。
+        val excludeCountries = settingsStore.excludeCountries
+        val onlyCountries = settingsStore.onlyCountries
+        val sourcesPerRun = settingsStore.sourcesPerRun
+        val perSourceSample = settingsStore.perSourceSample
+        val maxCandidates = settingsStore.maxCandidates
+        val minUploadEntries = settingsStore.minUploadEntries
+        val maxPerRegion = settingsStore.maxPerRegion
+
         // 1. 源发现（导航站 → 缓存 → 内置兜底）+ 拉取候选。
         val state = StateStore(context)
+        state.saveRunState(STAGE_SOURCES, 0, 0)
+        onProgress(STAGE_SOURCES, 0, 0)
+
         val discovered = try {
             CfCandidateSource.discoverSourceUrls()
         } catch (e: Exception) {
@@ -60,10 +74,15 @@ class CfOptimizerCoordinator(private val context: Context) {
 
         val sources = CfCandidateSource.BUILTIN_SOURCE_URLS +
                 (discovered.ifEmpty { state.cachedSourceUrls() }).shuffled()
-                    .take(CfCandidateSource.SOURCES_PER_RUN)
+                    .take(sourcesPerRun.coerceIn(1, 12))
 
         val candidates = try {
-            CfCandidateSource.fetchFrom(sources)
+            CfCandidateSource.fetchFrom(
+                sources,
+                excludedRegions = excludeCountries,
+                perSourceSample = perSourceSample,
+                maxCandidates = maxCandidates,
+            )
         } catch (e: Exception) {
             return Result(0, 0, false, "candidates_${e.javaClass.simpleName}", false, null)
         }
@@ -81,33 +100,47 @@ class CfOptimizerCoordinator(private val context: Context) {
             return Result(0, 0, false, "no_candidates", false, null)
         }
 
-        // 2. 物理网络探测（绑定 Network 的 socket，绕开本应用 VPN）。
+        // 2. 物理网络探测（绑定 Network 的 socket，绕开本应用 VPN）。进度实时上报。
         val probe = CfProbe(context)
-        val metrics = probe.measure(allCandidates)
+        val metrics = probe.measure(allCandidates) { done, total ->
+            state.saveRunState(STAGE_PROBE, done, total)
+            onProgress(STAGE_PROBE, done, total)
+        }
 
-        // 2.5 国家黑名单权威过滤：trace loc 在黑名单（网络封锁国家）的候选不进评分/上传。
-        //     与原版 EXCLUDE_COUNTRIES 应用位置一致（trace 阶段）；后缀预过滤已在候选源做。
+        // 2.5 国家过滤（原版 EXCLUDE_COUNTRIES / ONLY_COUNTRIES，应用在 trace 阶段）：
+        //     黑名单（trace loc 命中）不进评分/上传；白名单启用时只保留命中国家。
+        //     trace 失败（region 缺失）的候选保留——未知 ≠ 封锁，不因 trace 抖动把整轮清空。
         val probed = allCandidates.filter { cand ->
-            metrics[cand]?.let { it.region.uppercase() !in EXCLUDED_TRACE_REGIONS } ?: true
+            val region = metrics[cand]?.region?.uppercase() ?: return@filter true
+
+            if (region in excludeCountries) return@filter false
+            if (onlyCountries.isNotEmpty() && region !in onlyCountries) return@filter false
+
+            true
         }
 
         // 3. 引擎评分。下载测速本轮默认关：metrics.downloadMbps 全为 0，
         //    评分只含 TTFB 分量（上限 60），门槛分按 30/60 比例折半为 15，
         //    排序仍由 TTFB 主导，不因关闭下载而把所有候选拦在门外。
-        //    maxPerRegion=2（原版 SMART_PUSH_IPS_PER_CC）：防单地区垄断 Worker 列表。
-        val limits = OptimizerLimits(minScore = DOWNLOAD_OFF_MIN_SCORE, maxPerRegion = 2)
+        //    maxPerRegion（原版 SMART_PUSH_IPS_PER_CC）：防单地区垄断 Worker 列表。
+        state.saveRunState(STAGE_RANK, probed.size, allCandidates.size)
+        onProgress(STAGE_RANK, probed.size, allCandidates.size)
+
+        val limits = OptimizerLimits(minScore = DOWNLOAD_OFF_MIN_SCORE, maxPerRegion = maxPerRegion)
         var ranked = CfOptimizerEngine.rank(probed, metrics, limits)
 
         // 3.5 CIDR /24 前缀去重（原版 cidr_seen 语义）：同一 /24 只保留最高分，
         //     让 Worker 列表分散在不同网段；去重后不足质量门则不上传。
         ranked = dedupeByPrefix(ranked)
 
-        if (ranked.size < MIN_UPLOAD_ENTRIES) {
+        if (ranked.size < minUploadEntries) {
             return Result(allCandidates.size, ranked.size, false, "below_quality_gate", false, null)
         }
 
         // 4. 组装 Worker 列表：用户自定义静态行在前（与原脚本 custom_add.txt 语义一致），
         //    本轮优选行在后。空列表不上传（客户端 fail closed，双保险）。
+        state.saveRunState(STAGE_UPLOAD, 0, 1)
+        onProgress(STAGE_UPLOAD, 0, 1)
         val networkTag = probeTag(probe)
         val entries = settingsStore.customEntries.orEmpty().filter { it.isNotBlank() } +
                 ranked.map { it.toWorkerLine(networkTag) }
@@ -120,8 +153,11 @@ class CfOptimizerCoordinator(private val context: Context) {
         val uploadReason = (uploadResult as? WorkerUploadResult.Failure)?.reason?.name
 
         if (!uploaded) {
-            return Result(candidates.size, ranked.size, false, uploadReason, false, null)
+            return Result(allCandidates.size, ranked.size, false, uploadReason, false, null)
         }
+
+        state.saveRunState(STAGE_UPLOAD, 1, 1)
+        onProgress(STAGE_UPLOAD, 1, 1)
 
         // 6. 上传成功：先保存 last-known-good（下次空扫描/失败时可参考），再刷新订阅。
         StateStore(context).saveLastKnownGood(entries)
@@ -130,12 +166,19 @@ class CfOptimizerCoordinator(private val context: Context) {
         var profileError: String? = null
 
         if (profileId != null) {
-            try {
-                updateProfile(profileId)
-                profileUpdated = true
-            } catch (e: Exception) {
-                // 上传已成功、订阅刷新失败：如实区分，不称全链路成功。
-                profileError = e.message ?: "unknown"
+            // 订阅刷新重试（gRPC deadline 抖动一次重试可解，见真机
+            // 「列表已上传，订阅更新失败: context deadline exceeded」）。
+            repeat(2) { attempt ->
+                if (profileUpdated) return@repeat
+
+                try {
+                    if (attempt > 0) delay(TimeUnit.SECONDS.toMillis(2))
+                    updateProfile(profileId)
+                    profileUpdated = true
+                } catch (e: Exception) {
+                    // 上传已成功、订阅刷新失败：如实区分，不称全链路成功。
+                    profileError = e.message ?: "unknown"
+                }
             }
         }
 
@@ -189,24 +232,21 @@ class CfOptimizerCoordinator(private val context: Context) {
     }
 
     companion object {
-        /** 上传质量门：合格条目少于此数不上传（防止 1-2 个侥幸节点覆盖共享列表）。 */
-        const val MIN_UPLOAD_ENTRIES: Int = 3
+        /** 运行阶段标识（状态框 + 前台通知的确定性反馈来源）。 */
+        const val STAGE_SOURCES: String = "sources"
+        const val STAGE_PROBE: String = "probe"
+        const val STAGE_RANK: String = "rank"
+        const val STAGE_UPLOAD: String = "upload"
+        const val STAGE_DONE: String = "done"
+
+        /** 探测网络不可用时的兜底标签。 */
+        const val DEFAULT_TAG: String = "DefaultNet"
 
         /**
          * 下载测速关闭时的门槛分。契约基线 30 分按「评分上限 60」等比折半——
          * 关闭下载时评分只含 TTFB 分量，不折半会把所有候选拦在门外。
          */
         const val DOWNLOAD_OFF_MIN_SCORE: Double = 15.0
-
-        /** 探测网络不可用时的兜底标签。 */
-        const val DEFAULT_TAG: String = "DefaultNet"
-
-        /**
-         * 探测地区黑名单（与原版 EXCLUDE_COUNTRIES = {"RU","KP","CN","HK"} 同值）：
-         * trace loc 命中的候选不进评分/上传。trace 失败（region 缺失）的候选保留——
-         * 未知 ≠ 封锁，不因 trace 抖动把整轮清空。
-         */
-        val EXCLUDED_TRACE_REGIONS: Set<String> = setOf("RU", "KP", "CN", "HK")
     }
 }
 
@@ -246,6 +286,23 @@ class StateStore(context: Context) {
             ?.filter { it.isNotBlank() }
             ?: emptyList()
 
+    /**
+     * 运行状态（给状态框与前台服务通知）：stage + 进度，确定性反馈的来源。
+     */
+    fun saveRunState(stage: String, progress: Int, total: Int) {
+        preferences.edit()
+            .putString(KEY_RUN_STAGE, stage)
+            .putInt(KEY_RUN_PROGRESS, progress)
+            .putInt(KEY_RUN_TOTAL, total)
+            .putLong(KEY_RUN_UPDATED_AT, System.currentTimeMillis())
+            .apply()
+    }
+
+    fun runStage(): String = preferences.getString(KEY_RUN_STAGE, "") ?: ""
+    fun runProgress(): Int = preferences.getInt(KEY_RUN_PROGRESS, 0)
+    fun runTotal(): Int = preferences.getInt(KEY_RUN_TOTAL, 0)
+    fun runUpdatedAt(): Long = preferences.getLong(KEY_RUN_UPDATED_AT, 0L)
+
     fun lastSuccessAt(): Long = preferences.getLong(KEY_LAST_SUCCESS_AT, 0L)
 
     companion object {
@@ -253,5 +310,9 @@ class StateStore(context: Context) {
         private const val KEY_LAST_KNOWN_GOOD = "last_known_good"
         private const val KEY_LAST_SUCCESS_AT = "last_success_at"
         private const val KEY_SOURCE_URLS = "source_urls"
+        private const val KEY_RUN_STAGE = "run_stage"
+        private const val KEY_RUN_PROGRESS = "run_progress"
+        private const val KEY_RUN_TOTAL = "run_total"
+        private const val KEY_RUN_UPDATED_AT = "run_updated_at"
     }
 }

@@ -70,8 +70,16 @@ object CfCandidateSource {
 
     /**
      * 拉取候选。返回打乱后截断的候选列表；完全失败抛最后一个 [IOException]，由调用方决定终止路径。
+     *
+     * [excludedRegions]：黑名单地区（用户设置，默认 RU,KP,CN,HK）；[perSourceSample] /
+     * [maxCandidates]：用户设置的有界参数。
      */
-    fun fetchFrom(sources: List<String>): List<CandidateIp> {
+    fun fetchFrom(
+        sources: List<String>,
+        excludedRegions: Set<String> = EXCLUDED_SOURCE_REGIONS,
+        perSourceSample: Int = PER_SOURCE_SAMPLE,
+        maxCandidates: Int = MAX_CANDIDATES,
+    ): List<CandidateIp> {
         val rnd = Random(System.nanoTime())
 
         val merged = LinkedHashMap<String, CandidateIp>()
@@ -81,9 +89,9 @@ object CfCandidateSource {
             try {
                 val lines = downloadLines(url)
                     .shuffled(rnd)
-                    .take(PER_SOURCE_SAMPLE)
+                    .take(perSourceSample.coerceIn(1, 500))
 
-                for (candidate in parseCandidates(lines)) {
+                for (candidate in parseCandidates(lines, excludedRegions)) {
                     merged.putIfAbsent("${candidate.address}:${candidate.port}", candidate)
                 }
             } catch (e: IOException) {
@@ -92,7 +100,7 @@ object CfCandidateSource {
             }
         }
 
-        val result = merged.values.shuffled(rnd).take(MAX_CANDIDATES)
+        val result = merged.values.shuffled(rnd).take(maxCandidates.coerceIn(1, 1000))
         if (result.isEmpty() && lastError != null) throw lastError
 
         return result
@@ -118,13 +126,13 @@ object CfCandidateSource {
     }
 
     /** 下载源文本并解析为候选（黑名单地区后缀行直接丢弃）。 */
-    private fun parseCandidates(lines: List<String>): List<CandidateIp> =
+    private fun parseCandidates(lines: List<String>, excludedRegions: Set<String>): List<CandidateIp> =
         lines.asSequence()
             .map { line ->
                 val region = line.substringAfter('#', "").trim().uppercase()
                 line.substringBefore('#').trim() to region
             }
-            .filter { (_, region) -> region !in EXCLUDED_SOURCE_REGIONS }
+            .filter { (_, region) -> region !in excludedRegions }
             .mapNotNull { (entry, _) -> parseLine(entry) }
             .distinctBy { it.address to it.port }
             .toList()

@@ -280,4 +280,14 @@
     <string name="cf_optimizer_run_now_summary">測速候選 IP 並更新 Worker 共享列表</string>
     <string name="cf_optimizer_shared_list_title">共享列表確認</string>
     <string name="cf_optimizer_shared_list_message">Worker 的 ADD.txt 列表由使用同一 Worker 的所有裝置和訂閱共享。執行優選會用本機結果覆寫該列表。</string>
+    <string name="cf_optimizer_params">運行參數</string>
+    <string name="cf_optimizer_exclude_countries">排除國家（逗號分隔）</string>
+    <string name="cf_optimizer_only_countries">只選國家（留空不啟用）</string>
+    <string name="cf_optimizer_sources_per_run">每輪源數</string>
+    <string name="cf_optimizer_per_source_sample">單源抽樣條數</string>
+    <string name="cf_optimizer_max_candidates">候選上限</string>
+    <string name="cf_optimizer_min_upload_entries">上傳門檻</string>
+    <string name="cf_optimizer_max_per_region">每地區上限</string>
+    <string name="cf_optimizer_status_title">運行狀態</string>
+    <string name="cf_optimizer_status_idle">尚未運行</string>
 </resources>

@@ -283,4 +283,14 @@
     <string name="cf_optimizer_run_now_summary">후보 IP를 측정하고 Worker 공유 목록을 업데이트합니다</string>
     <string name="cf_optimizer_shared_list_title">공유 목록 확인</string>
     <string name="cf_optimizer_shared_list_message">Worker의 ADD.txt 목록은 동일한 Worker를 사용하는 모든 기기와 구독에서 공유됩니다. 최적화를 실행하면 이 기기의 결과로 덮어씁니다.</string>
+    <string name="cf_optimizer_params">실행 매개변수</string>
+    <string name="cf_optimizer_exclude_countries">제외 국가(쉼표 구분)</string>
+    <string name="cf_optimizer_only_countries">허용 국가(비우면 비활성)</string>
+    <string name="cf_optimizer_sources_per_run">실행당 소스 수</string>
+    <string name="cf_optimizer_per_source_sample">소스당 샘플 수</string>
+    <string name="cf_optimizer_max_candidates">후보 한도</string>
+    <string name="cf_optimizer_min_upload_entries">업로드 기준</string>
+    <string name="cf_optimizer_max_per_region">지역당 한도</string>
+    <string name="cf_optimizer_status_title">실행 상태</string>
+    <string name="cf_optimizer_status_idle">실행 기록 없음</string>
 </resources>

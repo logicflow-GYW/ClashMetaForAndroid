@@ -36,16 +36,26 @@ class CfProbe(private val context: Context) {
     /** HTTP 探测目标 host（SNI/Host 头）。 */
     private val probeHost: String = PROBE_HOST
 
-    suspend fun measure(candidates: List<CandidateIp>): Map<CandidateIp, ProbeMetrics> =
+    suspend fun measure(
+        candidates: List<CandidateIp>,
+        onProgress: suspend (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): Map<CandidateIp, ProbeMetrics> =
         withContext(Dispatchers.IO) {
             val network = candidateNetworks().firstOrNull() ?: return@withContext emptyMap()
             val semaphore = Semaphore(PROBE_CONCURRENCY)
+            var done = 0
 
             coroutineScope {
                 candidates.map { candidate ->
                     async {
                         semaphore.withPermit {
-                            measureOne(network, candidate)
+                            val result = measureOne(network, candidate)
+
+                            // 进度上报（探测是全程最长阶段，实时反馈给状态框与前台通知）。
+                            synchronized(Unit) { done += 1 }
+                            runCatching { onProgress(done, candidates.size) }
+
+                            result
                         }
                     }
                 }.awaitAll().filterNotNull().toMap()

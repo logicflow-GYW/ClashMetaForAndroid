@@ -63,12 +63,25 @@ class CfOptimizerService : BaseService() {
     }
 
     private suspend fun runOptimization() {
+        var lastTick = -1
+
         val result = try {
-            CfOptimizerCoordinator(this).run()
+            CfOptimizerCoordinator(this).run { stage, progress, total ->
+                // 确定性反馈：前台服务通知实时更新阶段与进度——挂在后台也看得到它在动。
+                // 节流：探测阶段每完成 5 个才刷一次通知（其余阶段量少直接刷）。
+                val tick = if (stage == CfOptimizerCoordinator.STAGE_PROBE) progress / 5 else -1
+                if (stage != CfOptimizerCoordinator.STAGE_PROBE || tick != lastTick) {
+                    lastTick = tick
+                    updateForegroundNotification(progressText(stage, progress, total))
+                }
+            }
         } catch (e: Exception) {
+            updateForegroundNotification(getString(R.string.running))
             notifyResult(getString(R.string.cf_optimizer_result_failure, e.message ?: "unknown"))
             return
         }
+
+        updateForegroundNotification(getString(R.string.running))
 
         when {
             !result.uploaded ->
@@ -78,6 +91,30 @@ class CfOptimizerService : BaseService() {
             else ->
                 notifyResult(getString(R.string.cf_optimizer_result_success, result.qualifiedCount))
         }
+    }
+
+    /** 阶段进度 → 用户可读文本（拉源 / 探测 i/total / 评分 / 上传）。 */
+    private fun progressText(stage: String, progress: Int, total: Int): String = when (stage) {
+        CfOptimizerCoordinator.STAGE_SOURCES -> getString(R.string.cf_optimizer_stage_sources)
+        CfOptimizerCoordinator.STAGE_PROBE ->
+            getString(R.string.cf_optimizer_stage_probe, progress, total)
+        CfOptimizerCoordinator.STAGE_RANK -> getString(R.string.cf_optimizer_stage_rank)
+        CfOptimizerCoordinator.STAGE_UPLOAD -> getString(R.string.cf_optimizer_stage_upload)
+        else -> getString(R.string.running)
+    }
+
+    /** 重发前台服务通知（更新进度文本；FGS 通知可反复 startForeground 刷新）。 */
+    private fun updateForegroundNotification(text: String) {
+        val notification = NotificationCompat.Builder(this, SERVICE_CHANNEL)
+            .setContentTitle(getString(R.string.cf_optimizer_service))
+            .setContentText(text)
+            .setColor(getColorCompat(R.color.color_clash))
+            .setSmallIcon(R.drawable.ic_logo_service)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .build()
+
+        startForegroundCompat(R.id.nf_cf_optimizer, notification)
     }
 
     private fun notifyResult(text: String) {

@@ -283,4 +283,14 @@
     <string name="cf_optimizer_run_now_summary">候補 IP を測定し、Worker の共有リストを更新します</string>
     <string name="cf_optimizer_shared_list_title">共有リストの確認</string>
     <string name="cf_optimizer_shared_list_message">Worker の ADD.txt リストは、同じ Worker を使うすべてのデバイスとサブスクリプションで共有されます。最適化を実行すると、このデバイスの結果で上書きされます。</string>
+    <string name="cf_optimizer_params">実行パラメータ</string>
+    <string name="cf_optimizer_exclude_countries">除外国（カンマ区切り）</string>
+    <string name="cf_optimizer_only_countries">許可国（空で無効）</string>
+    <string name="cf_optimizer_sources_per_run">1回のソース数</string>
+    <string name="cf_optimizer_per_source_sample">ソースあたりのサンプル数</string>
+    <string name="cf_optimizer_max_candidates">候補の上限</string>
+    <string name="cf_optimizer_min_upload_entries">アップロード基準</string>
+    <string name="cf_optimizer_max_per_region">地域あたりの上限</string>
+    <string name="cf_optimizer_status_title">実行状態</string>
+    <string name="cf_optimizer_status_idle">未実行</string>
 </resources>

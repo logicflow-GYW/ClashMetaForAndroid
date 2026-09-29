@@ -270,4 +270,14 @@
     <string name="cf_optimizer_run_now_summary">Đo IP ứng viên và cập nhật danh sách chia sẻ của Worker</string>
     <string name="cf_optimizer_shared_list_title">Xác nhận danh sách chia sẻ</string>
     <string name="cf_optimizer_shared_list_message">Danh sách ADD.txt của Worker được chia sẻ giữa mọi thiết bị và đăng ký dùng Worker này. Chạy tối ưu sẽ ghi đè bằng kết quả của thiết bị này.</string>
+    <string name="cf_optimizer_params">Tham số chạy</string>
+    <string name="cf_optimizer_exclude_countries">Quốc gia loại trừ (phân cách bởi dấu phẩy)</string>
+    <string name="cf_optimizer_only_countries">Chỉ các quốc gia này (để trống = tắt)</string>
+    <string name="cf_optimizer_sources_per_run">Nguồn mỗi lần chạy</string>
+    <string name="cf_optimizer_per_source_sample">Mẫu mỗi nguồn</string>
+    <string name="cf_optimizer_max_candidates">Giới hạn ứng viên</string>
+    <string name="cf_optimizer_min_upload_entries">Ngưỡng tải lên</string>
+    <string name="cf_optimizer_max_per_region">Tối đa mỗi khu vực</string>
+    <string name="cf_optimizer_status_title">Trạng thái chạy</string>
+    <string name="cf_optimizer_status_idle">Chưa chạy</string>
 </resources>
