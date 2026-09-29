@@ -17,6 +17,7 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLSocket
 
@@ -35,8 +36,14 @@ class CfProbe(private val context: Context, private val config: CfProbeConfig = 
     /** HTTP 探测目标 host（SNI/Host 头）。 */
     private val probeHost: String = PROBE_HOST
 
+    /**
+     * 对候选取 TTFB 采样。[regions] 由 [resolveRegions] 先行产出（trace 前置）——
+     * 本函数只做采样，trace 失败的候选在这里按 [REGION_FALLBACK] 记录（未知地区照测，
+     * 由协调器决定是否保留）。
+     */
     suspend fun measure(
         candidates: List<CandidateIp>,
+        regions: Map<CandidateIp, String> = emptyMap(),
         onProgress: suspend (done: Int, total: Int) -> Unit = { _, _ -> },
     ): Map<CandidateIp, ProbeMetrics> =
         withContext(Dispatchers.IO) {
@@ -48,7 +55,7 @@ class CfProbe(private val context: Context, private val config: CfProbeConfig = 
                 candidates.map { candidate ->
                     async {
                         semaphore.withPermit {
-                            val result = measureOne(network, candidate)
+                            val result = measureOne(network, candidate, regions[candidate] ?: REGION_FALLBACK)
 
                             // 进度上报（探测是全程最长阶段，实时反馈给状态框与前台通知）。
                             synchronized(Unit) { done += 1 }
@@ -112,10 +119,53 @@ class CfProbe(private val context: Context, private val config: CfProbeConfig = 
         }
 
     /**
-     * 探测单个候选：3 次 TTFB 采样 + 一次地区 trace。
+     * 地区解析（trace）—— 跑在 TTFB 采样**之前**（原版顺序：trace 循环里就把黑名单国家挡掉）。
+     *
+     * 为什么顺序重要（真机实测）：一轮 445 次 TTFB 探测里有 **229 次（51%）**打在随后就被丢弃的
+     * 黑名单地区上 —— 同一轮 probe 段耗时 163s，占整轮 232s 的 70%。trace 是单次 GET
+     * （几百字节、无采样），把它前置就能让"丢弃"这件事只付 trace 的价钱，等效把探测面翻倍。
+     *
+     * 返回 trace 成功的 `候选 -> 地区`；trace 失败的候选**不出现在结果里**（调用方按
+     * "未知 ≠ 封锁"保留它们，region 回落 [REGION_FALLBACK]）。
+     */
+    suspend fun resolveRegions(
+        candidates: List<CandidateIp>,
+        onProgress: suspend (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): Map<CandidateIp, String> =
+        withContext(Dispatchers.IO) {
+            val network = primaryNetwork() ?: return@withContext emptyMap()
+
+            if (candidates.isEmpty()) return@withContext emptyMap()
+
+            val semaphore = Semaphore(config.traceConcurrency)
+            var done = 0
+
+            coroutineScope {
+                candidates.map { candidate ->
+                    async {
+                        semaphore.withPermit {
+                            val region = runCatching { resolveRegionOne(network, candidate) }.getOrNull()
+
+                            synchronized(Unit) { done += 1 }
+                            runCatching { onProgress(done, candidates.size) }
+
+                            region?.let { candidate to it }
+                        }
+                    }
+                }.awaitAll().filterNotNull().toMap()
+            }
+        }
+
+    /**
+     * 探测单个候选的 TTFB（[config.ttfbSamples] 次采样）。
+     * 地区由 [resolveRegions] 先行确定、经 [regions] 传入 —— 本函数不再发 trace 请求。
      * 失败返回 null（该候选本轮无指标，引擎会丢弃）。
      */
-    private suspend fun measureOne(network: Network, candidate: CandidateIp): Pair<CandidateIp, ProbeMetrics>? {
+    private suspend fun measureOne(
+        network: Network,
+        candidate: CandidateIp,
+        region: String,
+    ): Pair<CandidateIp, ProbeMetrics>? {
         val https = candidate.port in HTTPS_PORTS
 
         val samples = mutableListOf<Long>()
@@ -136,18 +186,28 @@ class CfProbe(private val context: Context, private val config: CfProbeConfig = 
         val median = samples[samples.size / 2]
         val jitter = if (samples.size >= 2) samples.last() - samples.first() else 0L
 
-        val region = runCatching {
-            timedGet(network, candidate.address, candidate.port, https, "/cdn-cgi/trace", setOf(200), wantLoc = true)
-                ?.second?.let { loc -> loc.trim().uppercase().takeIf { it.length == 2 } }
-        }.getOrNull() ?: REGION_FALLBACK
-
         return candidate to ProbeMetrics(
             ttfbMs = median,
             jitterMs = jitter,
-            downloadMbps = 0.0, // 下载测速本轮默认关（契约 D 部分）；下载关闭时评分仅含 TTFB 分量，门槛分由协调器按比例折半。
+            downloadMbps = 0.0, // 带宽由测速段回填（measureDownloads）；未测到的节点由门槛拦下。
             successfulSamples = samples.size,
             region = region,
         )
+    }
+
+    /** 单候选地区解析：GET `/cdn-cgi/trace` 取 `loc=`，两次大写字母才认，否则 null（不猜）。 */
+    private fun resolveRegionOne(network: Network, candidate: CandidateIp): String? {
+        val https = candidate.port in HTTPS_PORTS
+
+        return timedGet(
+            network,
+            candidate.address,
+            candidate.port,
+            https,
+            "/cdn-cgi/trace",
+            setOf(200),
+            wantLoc = true,
+        )?.second?.let { loc -> loc.trim().uppercase().takeIf { it.length == 2 } }
     }
 
     /**
@@ -192,7 +252,10 @@ class CfProbe(private val context: Context, private val config: CfProbeConfig = 
         try {
             socket.tcpNoDelay = true
             socket.connect(InetSocketAddress(candidate.address, candidate.port), CONNECT_TIMEOUT_MS)
-            socket.soTimeout = READ_TIMEOUT_MS
+            // 读超时与整体截止对齐（原版语义）：中途卡住时按**已读字节**结算速率，
+            // 而不是整条丢弃。用 10s 的通用读超时会怎样（真机实测）：池子 40 个只出 19 条读数 ——
+            // 慢节点被判成"没有读数"，于是最终名单里留下的反而是"没被测速过"的节点。
+            socket.soTimeout = config.downloadTimeoutMs.toInt()
 
             val io = if (https) {
                 val ssl = sslWrap(socket, DOWNLOAD_HOST, candidate.port)
@@ -220,7 +283,12 @@ class CfProbe(private val context: Context, private val config: CfProbeConfig = 
 
             while (bytes < config.downloadMaxBytes) {
                 val want = minOf(buffer.size.toLong(), config.downloadMaxBytes - bytes).toInt()
-                val read = input.read(buffer, 0, want)
+                val read = try {
+                    input.read(buffer, 0, want)
+                } catch (e: SocketTimeoutException) {
+                    // 读到截止还没出下一段 —— 按已读字节结算（原版 `bytes/elapsed` 语义），不整条丢弃。
+                    break
+                }
                 if (read < 0) break
 
                 bytes += read

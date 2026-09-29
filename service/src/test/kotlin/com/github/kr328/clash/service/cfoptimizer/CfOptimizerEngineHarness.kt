@@ -30,8 +30,9 @@ fun near(a: Double, b: Double, eps: Double = 1e-6) = kotlin.math.abs(a - b) < ep
 
 fun main() {
     // ---- 1. 固定分数 ----
-    check("score ttfb=200 bw=75 = 65.0",
-        near(CfOptimizerEngine.scoreOf(ProbeMetrics(200, 10, 75.0, 3)), 65.0))
+    // 默认带宽参考值 50（原脚本 150）：0.6*(1-200/800) + 0.4*min(1,75/50) = 0.45 + 0.4 = 0.85
+    check("score ttfb=200 bw=75 = 85.0（默认参考值 50）",
+        near(CfOptimizerEngine.scoreOf(ProbeMetrics(200, 10, 75.0, 3)), 85.0))
     check("score ttfb=0 bw=150 = 100.0",
         near(CfOptimizerEngine.scoreOf(ProbeMetrics(0, 0, 150.0, 1)), 100.0))
     check("score ttfb=800 bw=0 = 0.0",
@@ -42,6 +43,16 @@ fun main() {
         near(CfOptimizerEngine.scoreOf(ProbeMetrics(0, 0, 500.0, 1)), 100.0))
     check("score ttfb>800 floored at 0",
         near(CfOptimizerEngine.scoreOf(ProbeMetrics(2000, 0, 150.0, 1)), 40.0)) // 0.6*0 + 0.4*1 = 40
+
+    // ---- 1b. 带宽参考值可调 + 非法值不产生 NaN/Inf ----
+    check("参考值 50：bw=25 得一半带宽分（0.6+0.2 = 80.0）",
+        near(CfOptimizerEngine.scoreOf(ProbeMetrics(0, 0, 25.0, 1)), 80.0))
+    check("参考值可覆盖：传 150 → bw=75 得一半带宽分（80.0）",
+        near(CfOptimizerEngine.scoreOf(ProbeMetrics(0, 0, 75.0, 1), bwRefMbps = 150.0), 80.0))
+    check("参考值 0 → 回落默认 50（不产生 NaN/Inf）",
+        near(CfOptimizerEngine.scoreOf(ProbeMetrics(0, 0, 25.0, 1), bwRefMbps = 0.0), 80.0))
+    check("参考值负数 → 回落默认 50",
+        near(CfOptimizerEngine.scoreOf(ProbeMetrics(0, 0, 25.0, 1), bwRefMbps = -5.0), 80.0))
 
     // ---- 2. 门槛边界 ----
     val m30 = ProbeMetrics(400, 0, 0.0, 1) // score = 30.0（>= minScore=30，应保留）

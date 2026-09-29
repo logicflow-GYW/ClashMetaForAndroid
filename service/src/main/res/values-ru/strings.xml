@@ -22,6 +22,7 @@
     <string name="cf_optimizer_service">CF Оптимизатор</string>
     <string name="cf_optimizer_result_success">Оптимизировано узлов: %1$d, успешно загружено</string>
     <string name="cf_optimizer_stage_sources">Получение списка источников</string>
+    <string name="cf_optimizer_stage_trace">Определение региона %1$d/%2$d</string>
     <string name="cf_optimizer_stage_probe">Проверка %1$d/%2$d</string>
     <string name="cf_optimizer_stage_rank">Оценка кандидатов</string>
     <string name="cf_optimizer_stage_download">Скорость %1$d/%2$d</string>

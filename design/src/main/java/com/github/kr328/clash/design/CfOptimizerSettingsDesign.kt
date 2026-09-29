@@ -364,6 +364,8 @@ class CfOptimizerSettingsDesign(
         return when (stage) {
             CfOptimizerCoordinator.STAGE_SOURCES ->
                 context.getString(ServiceR.string.cf_optimizer_stage_sources)
+            CfOptimizerCoordinator.STAGE_TRACE ->
+                context.getString(ServiceR.string.cf_optimizer_stage_trace, progress, total)
             CfOptimizerCoordinator.STAGE_TCP ->
                 context.getString(ServiceR.string.cf_optimizer_stage_tcp, progress, total)
             CfOptimizerCoordinator.STAGE_PROBE ->

@@ -100,6 +100,8 @@ class CfOptimizerService : BaseService() {
     /** 阶段进度 → 用户可读文本（拉源 / 探测 i/total / 下载测速 / 评分 / 上传）。 */
     private fun progressText(stage: String, progress: Int, total: Int): String = when (stage) {
         CfOptimizerCoordinator.STAGE_SOURCES -> getString(R.string.cf_optimizer_stage_sources)
+        CfOptimizerCoordinator.STAGE_TRACE ->
+            getString(R.string.cf_optimizer_stage_trace, progress, total)
         CfOptimizerCoordinator.STAGE_PROBE ->
             getString(R.string.cf_optimizer_stage_probe, progress, total)
         CfOptimizerCoordinator.STAGE_DOWNLOAD ->

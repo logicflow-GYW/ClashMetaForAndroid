@@ -20,6 +20,7 @@
     <string name="cf_optimizer_service">CF 优选</string>
     <string name="cf_optimizer_result_success">优选 %1$d 个节点，已上传成功</string>
     <string name="cf_optimizer_stage_sources">正在拉取候选源</string>
+    <string name="cf_optimizer_stage_trace">正在解析地区 %1$d/%2$d</string>
     <string name="cf_optimizer_stage_probe">正在探测 %1$d/%2$d</string>
     <string name="cf_optimizer_stage_rank">正在评分</string>
     <string name="cf_optimizer_stage_download">测速 %1$d/%2$d</string>

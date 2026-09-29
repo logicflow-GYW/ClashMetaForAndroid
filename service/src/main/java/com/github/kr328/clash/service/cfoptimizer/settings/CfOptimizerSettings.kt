@@ -100,24 +100,25 @@ class CfOptimizerSettingsStore(context: Context) {
             .filter { it.length == 2 }
             .toSet()
 
-    /** 每轮从源池抽取的源数（原版动态通讯录；默认 8——源池约百个，多抽几个只多几 KB 流量）。 */
+    /** 每轮从源池抽取的源数（原版动态通讯录；默认见 [CfOptimizerTuning.SOURCES_PER_RUN_DEFAULT]）——
+     *  实测单源产出极不均（最富的源 15490 行，导航站里多数只有 2–50 行），多抽几个源买的是"抽到富源"的概率。 */
     var sourcesPerRunRaw: String by store.string(
         key = "cfoptimizer_sources_per_run",
-        defaultValue = "8",
+        defaultValue = CfOptimizerTuning.SOURCES_PER_RUN_DEFAULT.toString(),
     )
 
     val sourcesPerRun: Int get() = CfOptimizerTuning.sourcesPerRun(sourcesPerRunRaw)
 
     /**
-     * 单源抽样条数（原版 `sample_limit` 的手机端等价物；默认 250）。
+     * 单源抽样条数（原版 `sample_limit` 的手机端等价物；默认见 [CfOptimizerTuning.PER_SOURCE_SAMPLE_DEFAULT]）。
      *
-     * 250 × [sourcesPerRun]=8 ≈ 2000 条原始候选 —— 与原版 `sample_limit=3000` 同一量级。
-     * 这个数是**便宜层**：只付 TCP connect 的价钱（1s 超时、200 并发），
-     * 真正进 TTFB 段的由 [maxCandidates] 单独封顶。
+     * 原版单源就是 1000–3000 条，而实测最富的源有 15490 行 —— 抽 250 等于把这个源丢掉 98%。
+     * 这个数是**便宜层**：只付 TCP connect 的价钱（1s 超时、几百并发），
+     * 真正进 TTFB 段的由 [maxCandidates] 单独封顶，所以放大它是安全的。
      */
     var perSourceSampleRaw: String by store.string(
         key = "cfoptimizer_per_source_sample",
-        defaultValue = "250",
+        defaultValue = CfOptimizerTuning.PER_SOURCE_SAMPLE_DEFAULT.toString(),
     )
 
     val perSourceSample: Int get() = CfOptimizerTuning.perSourceSample(perSourceSampleRaw)
@@ -132,7 +133,7 @@ class CfOptimizerSettingsStore(context: Context) {
      */
     var maxCandidatesRaw: String by store.string(
         key = "cfoptimizer_max_candidates",
-        defaultValue = "600",
+        defaultValue = CfOptimizerTuning.MAX_CANDIDATES_DEFAULT.toString(),
     )
 
     val maxCandidates: Int get() = CfOptimizerTuning.maxCandidates(maxCandidatesRaw)
@@ -145,10 +146,10 @@ class CfOptimizerSettingsStore(context: Context) {
 
     val minUploadEntries: Int get() = CfOptimizerTuning.minUploadEntries(minUploadEntriesRaw)
 
-    /** 每地区最多保留条数（原版 `SMART_PUSH_IPS_PER_CC`；真机日志实测每地区贡献 4 个、合计 8 个）。取 3：介于我们原默认 2 与原版实测 4 之间。 */
+    /** 每地区最多保留条数（原版 `SMART_PUSH_IPS_PER_CC` = 4）。0 = 不限。 */
     var maxPerRegionRaw: String by store.string(
         key = "cfoptimizer_max_per_region",
-        defaultValue = "3",
+        defaultValue = CfOptimizerTuning.MAX_PER_REGION_DEFAULT.toString(),
     )
 
     val maxPerRegion: Int get() = CfOptimizerTuning.maxPerRegion(maxPerRegionRaw)
@@ -180,6 +181,17 @@ class CfOptimizerSettingsStore(context: Context) {
     )
 
     val probeConcurrency: Int get() = CfOptimizerTuning.probeConcurrency(probeConcurrencyRaw)
+
+    /**
+     * 地区解析（trace）并发（原版 `MAX_TRACE_WORKERS`）—— 单次 GET、无采样，单价低于 TTFB 采样，
+     * 所以单独给一档更高的并发。它跑在 TTFB 之前，用于把黑名单地区挡在昂贵采样之外。
+     */
+    var traceConcurrencyRaw: String by store.string(
+        key = "cfoptimizer_trace_concurrency",
+        defaultValue = CfOptimizerTuning.TRACE_CONCURRENCY_DEFAULT.toString(),
+    )
+
+    val traceConcurrency: Int get() = CfOptimizerTuning.traceConcurrency(traceConcurrencyRaw)
 
     /** 单候选 TTFB 采样次数（原版硬编码 3）。 */
     var ttfbSamplesRaw: String by store.string(
@@ -257,6 +269,33 @@ class CfOptimizerSettingsStore(context: Context) {
     /** 生效门槛分 —— 带宽分量关掉时满分只有 60，门槛按比例下调（见 CfOptimizerTuning）。 */
     val effectiveMinScore: Double
         get() = CfOptimizerTuning.effectiveMinScore(minScoreRaw, downloadTestEnabled)
+
+    /**
+     * 带宽下限（Mbps）—— 低于此值的候选不进最终名单（原版没有这一条，但它的最终名单
+     * `final = select(bw_results)` 只从"测速成功"的集合里挑，我们是靠这个门槛补同样的漏）。
+     */
+    var minDownloadMbpsRaw: String by store.string(
+        key = "cfoptimizer_min_download_mbps",
+        defaultValue = CfOptimizerTuning.MIN_DOWNLOAD_MBPS_DEFAULT.toString(),
+    )
+
+    /**
+     * 生效带宽下限 —— **关掉下载测速时必须归零**：那时全池的 `downloadMbps` 都是 0，
+     * 门槛照用会把名单清空（和门槛分折半是同一个原因）。默认 1.0 只在测速开启时生效。
+     */
+    val effectiveMinDownloadMbps: Double
+        get() = CfOptimizerTuning.effectiveMinDownloadMbps(minDownloadMbpsRaw, downloadTestEnabled)
+
+    /**
+     * 评分里带宽分量满分的参考值（Mbps；原版 `SCORE_MAX_BPS = 150`）。
+     * 默认 50：150 在 10–30 Mbps 链路上让带宽分量退化成常数、排序只剩 TTFB（实测说明见 CfOptimizerTuning）。
+     */
+    var scoreBwRefMbpsRaw: String by store.string(
+        key = "cfoptimizer_score_bw_ref_mbps",
+        defaultValue = CfOptimizerTuning.SCORE_BW_REF_MBPS_DEFAULT.toString(),
+    )
+
+    val scoreBwRefMbps: Double get() = CfOptimizerTuning.scoreBwRefMbps(scoreBwRefMbpsRaw)
 
     /** 最终输出条数上限（原版 SMART_PUSH_MAX_TOTAL）。 */
     var maxEntriesRaw: String by store.string(
