@@ -58,7 +58,13 @@
         <receiver
             android:name=".cfoptimizer.CfOptimizerReceiver"
             android:enabled="true"
-            android:exported="false" />
+            android:exported="false">
+            <!-- Package-limited implicit broadcast from the settings UI: a manifest
+                 receiver without an intent-filter only receives explicit intents. -->
+            <intent-filter>
+                <action android:name="com.github.metacubex.clash.action.RUN_CF_OPTIMIZER" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name=".FilesProvider"
