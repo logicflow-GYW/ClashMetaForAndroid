@@ -277,8 +277,8 @@
     <string name="cf_optimizer_subscription_profile">紐付けするサブスクリプション</string>
     <string name="cf_optimizer_subscription_profile_none">なし</string>
     <string name="cf_optimizer_custom_entries">カスタム静的エントリ</string>
-    <string name="cf_optimizer_scan_on_network_change">ネットワーク変更時にスキャン</string>
-    <string name="cf_optimizer_scan_on_network_change_summary">ネットワーク変更時に候補 IP を再スキャンします。既定では無効です。</string>
+    <string name="cf_optimizer_auto_heal">劣化時の自動再最適化</string>
+    <string name="cf_optimizer_auto_heal_summary">多数のノードが失敗または遅延している場合に自動で最適化を実行します（最短6時間に1回）。デフォルトはオフです。ネットワーク種別は問いません（Wi-Fi・モバイルデータ回線どちらでも）。</string>
     <string name="cf_optimizer_run_now">今すぐ最適化を実行</string>
     <string name="cf_optimizer_run_now_summary">候補 IP を測定し、Worker の共有リストを更新します</string>
     <string name="cf_optimizer_shared_list_title">共有リストの確認</string>

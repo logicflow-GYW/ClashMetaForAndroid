@@ -293,8 +293,8 @@
     <string name="cf_optimizer_subscription_profile">绑定的订阅</string>
     <string name="cf_optimizer_subscription_profile_none">未绑定</string>
     <string name="cf_optimizer_custom_entries">自定义静态行</string>
-    <string name="cf_optimizer_scan_on_network_change">网络切换时自动扫描</string>
-    <string name="cf_optimizer_scan_on_network_change_summary">网络变化时自动重新优选候选 IP，默认关闭。</string>
+    <string name="cf_optimizer_auto_heal">劣化自动补货</string>
+    <string name="cf_optimizer_auto_heal_summary">多数节点失联或变慢时自动跑一轮完整优选（最快 6 小时一次），默认关闭。不限网络类型（Wi-Fi 与流量均可）。</string>
     <string name="cf_optimizer_run_now">立即运行优选</string>
     <string name="cf_optimizer_run_now_summary">测速候选 IP 并更新 Worker 共享列表</string>
     <string name="cf_optimizer_shared_list_title">共享列表确认</string>

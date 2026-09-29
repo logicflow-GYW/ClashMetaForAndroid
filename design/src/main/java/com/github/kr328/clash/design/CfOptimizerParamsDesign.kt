@@ -111,9 +111,9 @@ class CfOptimizerParamsDesign(
             )
 
             switch(
-                value = cfSettings::scanOnNetworkChange,
-                title = R.string.cf_optimizer_scan_on_network_change,
-                summary = R.string.cf_optimizer_scan_on_network_change_summary,
+                value = cfSettings::autoHealEnabled,
+                title = R.string.cf_optimizer_auto_heal,
+                summary = R.string.cf_optimizer_auto_heal_summary,
             )
 
             category(R.string.cf_optimizer_group_manual)
