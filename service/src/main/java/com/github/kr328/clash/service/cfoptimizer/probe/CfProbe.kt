@@ -65,7 +65,7 @@ class CfProbe(private val context: Context) {
                 timedGet(network, candidate.address, candidate.port, https, "/generate_204?ed=2560", setOf(200, 204))
             }.getOrNull()
 
-            if (elapsed != null) samples.add(elapsed)
+            if (elapsed != null) samples.add(elapsed.first)
             if (samples.size < TTFB_SAMPLES) kotlinx.coroutines.delay(SAMPLE_GAP_MS)
         }
 

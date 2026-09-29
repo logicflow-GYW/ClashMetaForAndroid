@@ -75,7 +75,7 @@ class CfOptimizerCoordinator(private val context: Context) {
         // 4. 组装 Worker 列表：用户自定义静态行在前（与原脚本 custom_add.txt 语义一致），
         //    本轮优选行在后。空列表不上传（客户端 fail closed，双保险）。
         val networkTag = probeTag(probe)
-        val entries = settingsStore.customEntries.filter { it.isNotBlank() } +
+        val entries = settingsStore.customEntries.orEmpty().filter { it.isNotBlank() } +
                 ranked.map { it.toWorkerLine(networkTag) }
 
         // 5. 上传 Worker（整体覆写语义：只在本轮有达标结果时才覆盖）。
