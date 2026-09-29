@@ -371,4 +371,9 @@
     <string name="cf_optimizer_share_summary">Отправить экспортированные файлы в другое приложение</string>
     <string name="cf_optimizer_share_title">Поделиться данными оптимизации CF</string>
     <string name="cf_optimizer_share_failed">Не удалось поделиться: %1$s</string>
+    <string name="cf_optimizer_params_entry_summary">Фильтрация, квоты и поведение — всё настраивается; пустые значения используют стандартные.</string>
+    <string name="cf_optimizer_group_filter">Фильтрация</string>
+    <string name="cf_optimizer_group_quota">Квоты и параллелизм</string>
+    <string name="cf_optimizer_group_behavior">Поведение</string>
+    <string name="cf_optimizer_group_manual">Ручные записи</string>
 </resources>

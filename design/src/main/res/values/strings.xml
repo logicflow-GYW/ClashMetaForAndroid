@@ -1,8 +1,8 @@
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="PluralsCandidate">
     <string name="launch_name_meta">ClashPilot</string>
-    <string name="launch_name_alpha">ClashPilot Alpha</string>
+    <string name="launch_name_alpha">ClashPilot</string>
     <string name="application_name_meta">ClashPilot</string>
-    <string name="application_name_alpha">ClashPilot Alpha</string>
+    <string name="application_name_alpha">ClashPilot</string>
 
     <string name="stopped">Stopped</string>
     <string name="tap_to_start">Tap to start</string>
@@ -414,4 +414,9 @@
     <string name="cf_optimizer_share_summary">Send the exported files to another app</string>
     <string name="cf_optimizer_share_title">Share CF optimizer data</string>
     <string name="cf_optimizer_share_failed">Share failed: %1$s</string>
+    <string name="cf_optimizer_params_entry_summary">Filtering, quotas and behavior — all tunable; empty values fall back to defaults.</string>
+    <string name="cf_optimizer_group_filter">Filtering</string>
+    <string name="cf_optimizer_group_quota">Quotas &amp; concurrency</string>
+    <string name="cf_optimizer_group_behavior">Behavior</string>
+    <string name="cf_optimizer_group_manual">Manual entries</string>
 </resources>

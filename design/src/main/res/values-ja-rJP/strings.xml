@@ -307,4 +307,9 @@
     <string name="cf_optimizer_share_summary">書き出したファイルを他のアプリへ送る（チャット / クラウド / メール）</string>
     <string name="cf_optimizer_share_title">CF 最適化データを共有</string>
     <string name="cf_optimizer_share_failed">共有できませんでした：%1$s</string>
+    <string name="cf_optimizer_params_entry_summary">フィルタリング・クォータ・動作はすべて調整可能です。空欄の場合はデフォルト値を使用します</string>
+    <string name="cf_optimizer_group_filter">フィルタリング</string>
+    <string name="cf_optimizer_group_quota">クォータと同時実行</string>
+    <string name="cf_optimizer_group_behavior">動作</string>
+    <string name="cf_optimizer_group_manual">手動エントリ</string>
 </resources>

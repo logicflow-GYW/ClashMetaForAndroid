@@ -41,6 +41,7 @@ class CfOptimizerSettingsDesign(
 ) : Design<CfOptimizerSettingsDesign.Request>(context) {
     enum class Request {
         RunCfOptimizer,
+        OpenParams,
     }
 
     private val binding = DesignSettingsCfOptimizerBinding
@@ -50,12 +51,6 @@ class CfOptimizerSettingsDesign(
         get() = binding.root
 
     private val stateStore = StateStore(context)
-
-    /** 非空 String 参数的适配器（editableText 需要 NullableTextAdapter<T>）。 */
-    private val stringAdapter = object : NullableTextAdapter<String> {
-        override fun from(value: String): String? = value
-        override fun to(text: String?): String = text ?: ""
-    }
 
     init {
         binding.self = this
@@ -87,18 +82,16 @@ class CfOptimizerSettingsDesign(
                 title = R.string.cf_optimizer_subscription_profile,
             )
 
-            editableTextList(
-                value = cfSettings::customEntries,
-                adapter = TextAdapter.String,
-                title = R.string.cf_optimizer_custom_entries,
-                placeholder = R.string.cf_optimizer_not_set,
-            )
-
-            switch(
-                value = cfSettings::scanOnNetworkChange,
-                title = R.string.cf_optimizer_scan_on_network_change,
-                summary = R.string.cf_optimizer_scan_on_network_change_summary,
-            )
+            // 运行参数集中到子页面（CfOptimizerParamsActivity）—— 之前和这些行平铺在一页里，
+            // 用户反馈「进去看着挺乱」；主页只留开关 / Worker / 数据这些一眼能看懂的。
+            clickable(
+                title = R.string.cf_optimizer_params,
+                summary = R.string.cf_optimizer_params_entry_summary,
+            ) {
+                clicked {
+                    requests.trySend(Request.OpenParams)
+                }
+            }
 
             val runNowPref = clickable(
                 title = R.string.cf_optimizer_run_now,
@@ -121,67 +114,6 @@ class CfOptimizerSettingsDesign(
                     }
                 }
             }
-
-            // 运行参数（模仿原版 cf_config.py，全部可配、空/非法回落默认）。
-            category(R.string.cf_optimizer_params)
-
-            tips(R.string.cf_optimizer_tips_params)
-
-            editableText(
-                value = cfSettings::excludeCountriesRaw,
-                adapter = stringAdapter,
-                title = R.string.cf_optimizer_exclude_countries,
-                empty = R.string.cf_optimizer_not_set,
-            )
-
-            editableText(
-                value = cfSettings::onlyCountriesRaw,
-                adapter = stringAdapter,
-                title = R.string.cf_optimizer_only_countries,
-                empty = R.string.cf_optimizer_not_set,
-            )
-
-            editableText(
-                value = cfSettings::sourcesPerRunRaw,
-                adapter = stringAdapter,
-                title = R.string.cf_optimizer_sources_per_run,
-            )
-
-            editableText(
-                value = cfSettings::perSourceSampleRaw,
-                adapter = stringAdapter,
-                title = R.string.cf_optimizer_per_source_sample,
-            )
-
-            editableText(
-                value = cfSettings::maxCandidatesRaw,
-                adapter = stringAdapter,
-                title = R.string.cf_optimizer_max_candidates,
-            )
-
-            editableText(
-                value = cfSettings::minUploadEntriesRaw,
-                adapter = stringAdapter,
-                title = R.string.cf_optimizer_min_upload_entries,
-            )
-
-            editableText(
-                value = cfSettings::maxPerRegionRaw,
-                adapter = stringAdapter,
-                title = R.string.cf_optimizer_max_per_region,
-            )
-
-            switch(
-                value = cfSettings::downloadTestEnabled,
-                title = R.string.cf_optimizer_download_test,
-                summary = R.string.cf_optimizer_download_test_summary,
-            )
-
-            switch(
-                value = cfSettings::memoryEnabled,
-                title = R.string.cf_optimizer_memory,
-                summary = R.string.cf_optimizer_memory_summary,
-            )
 
             // 运行数据：摘要显示"攒了多少"，点一下导出 —— 导出到下载目录下的导出子文件夹
             // （Download/CF优选/），零权限，文件管理器 / Termux / adb 都能直接拿到。
