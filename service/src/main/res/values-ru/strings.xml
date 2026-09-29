@@ -24,6 +24,7 @@
     <string name="cf_optimizer_stage_sources">Получение списка источников</string>
     <string name="cf_optimizer_stage_probe">Проверка %1$d/%2$d</string>
     <string name="cf_optimizer_stage_rank">Оценка кандидатов</string>
+    <string name="cf_optimizer_stage_download">Скорость %1$d/%2$d</string>
     <string name="cf_optimizer_stage_upload">Загрузка в Worker</string>
     <string name="cf_optimizer_result_failure">Ошибка CF-оптимизатора: %1$s</string>
     <string name="cf_optimizer_result_profile_failed">Список загружен, обновление профиля не удалось: %1$s</string>

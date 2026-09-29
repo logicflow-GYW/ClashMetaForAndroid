@@ -61,6 +61,8 @@ class CfOptimizerSettingsDesign(
         val screen = preferenceScreen(context) {
             category(R.string.cf_optimizer)
 
+            tips(R.string.cf_optimizer_tips_overview)
+
             switch(
                 value = cfSettings::enabled,
                 title = R.string.cf_optimizer_enable,
@@ -92,7 +94,7 @@ class CfOptimizerSettingsDesign(
                 summary = R.string.cf_optimizer_scan_on_network_change_summary,
             )
 
-            clickable(
+            val runNowPref = clickable(
                 title = R.string.cf_optimizer_run_now,
                 summary = R.string.cf_optimizer_run_now_summary,
             ) {
@@ -116,6 +118,8 @@ class CfOptimizerSettingsDesign(
 
             // 运行参数（模仿原版 cf_config.py，全部可配、空/非法回落默认）。
             category(R.string.cf_optimizer_params)
+
+            tips(R.string.cf_optimizer_tips_params)
 
             editableText(
                 value = cfSettings::excludeCountriesRaw,
@@ -159,6 +163,12 @@ class CfOptimizerSettingsDesign(
                 value = cfSettings::maxPerRegionRaw,
                 adapter = stringAdapter,
                 title = R.string.cf_optimizer_max_per_region,
+            )
+
+            switch(
+                value = cfSettings::downloadTestEnabled,
+                title = R.string.cf_optimizer_download_test,
+                summary = R.string.cf_optimizer_download_test_summary,
             )
 
             // CF optimizer initial summaries — never echo the password value.
@@ -265,48 +275,71 @@ class CfOptimizerSettingsDesign(
                         .show()
                 }
             }
+
+            // 运行状态直接写在「立即运行优选」的副标题上 —— 不再单独占一张卡片：
+            // 通知栏已经实时显示阶段与进度，页面顶部再放一块既是重复信息，也吃掉一大块留白。
+            launch(Dispatchers.Main) {
+                while (isActive) {
+                    runNowPref.summary = withContext(Dispatchers.IO) { statusText() }
+
+                    delay(STATUS_POLL_MILLIS)
+                }
+            }
         }
 
         binding.content.addView(screen.root)
-
-        // 运行状态轮询（给状态框的确定性反馈）。
-        launch(Dispatchers.Main) {
-            while (isActive) {
-                val text = withContext(Dispatchers.IO) { statusText() }
-
-                binding.statusTextView.text = text
-
-                delay(2000)
-            }
-        }
     }
 
-    /** 状态框文本：阶段 + 进度 + 上次更新时间。 */
+    /**
+     * 「立即运行优选」的副标题：跑的时候显示阶段(+进度)，跑完显示上次成功时间，
+     * 从没跑过则回落到说明文案。状态由 [StateStore] 的 stage 驱动（服务结束时写 DONE），
+     * 不靠时间窗猜。
+     */
     private fun statusText(): String {
-        val updated = stateStore.runUpdatedAt()
+        val stage = stateStore.runStage()
+        val stale = System.currentTimeMillis() - stateStore.runUpdatedAt() > RUNNING_STALE_MILLIS
 
-        if (updated == 0L) {
-            return context.getString(R.string.cf_optimizer_status_idle)
+        if (stage.isNotEmpty() && stage != CfOptimizerCoordinator.STAGE_DONE && !stale) {
+            return stageText(stage)
         }
 
-        val stage = stateStore.runStage()
+        val success = stateStore.lastSuccessAt()
+        if (success > 0) {
+            val time = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(success))
+
+            return context.getString(R.string.cf_optimizer_last_success, time)
+        }
+
+        return context.getText(R.string.cf_optimizer_run_now_summary).toString()
+    }
+
+    private fun stageText(stage: String): String {
         val progress = stateStore.runProgress()
         val total = stateStore.runTotal()
 
-        val stageName = when (stage) {
+        return when (stage) {
             CfOptimizerCoordinator.STAGE_SOURCES ->
                 context.getString(ServiceR.string.cf_optimizer_stage_sources)
             CfOptimizerCoordinator.STAGE_PROBE ->
                 context.getString(ServiceR.string.cf_optimizer_stage_probe, progress, total)
+            CfOptimizerCoordinator.STAGE_DOWNLOAD ->
+                context.getString(ServiceR.string.cf_optimizer_stage_download, progress, total)
             CfOptimizerCoordinator.STAGE_RANK ->
                 context.getString(ServiceR.string.cf_optimizer_stage_rank)
             CfOptimizerCoordinator.STAGE_UPLOAD ->
                 context.getString(ServiceR.string.cf_optimizer_stage_upload)
-            else -> stage
+            else -> context.getText(R.string.cf_optimizer_run_now_summary).toString()
         }
+    }
 
-        val time = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(updated))
+    private companion object {
+        /** 状态行刷新间隔（毫秒）：只改一行文字，比原来 2s 轮询一整张卡片便宜。 */
+        const val STATUS_POLL_MILLIS: Long = 2_000
 
-        return "$stageName · $time"
+        /**
+         * 运行状态过期阈值：前台服务被系统杀掉时 stage 会停在中间态，
+         * 超过这个时间就不再声称「正在运行」（避免永远显示假的进行中）。
+         */
+        const val RUNNING_STALE_MILLIS: Long = 10 * 60 * 1000
     }
 }

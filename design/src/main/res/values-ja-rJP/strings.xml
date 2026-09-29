@@ -284,6 +284,11 @@
     <string name="cf_optimizer_shared_list_title">共有リストの確認</string>
     <string name="cf_optimizer_shared_list_message">Worker の ADD.txt リストは、同じ Worker を使うすべてのデバイスとサブスクリプションで共有されます。最適化を実行すると、このデバイスの結果で上書きされます。</string>
     <string name="cf_optimizer_params">実行パラメータ</string>
+    <string name="cf_optimizer_tips_overview">実際の下位ネットワーク上で Cloudflare 候補 IP を測定し（このアプリ自身の VPN は経由しません）、スコア順に勝者を Worker 共有リストへ書き込み、バインドした購読を更新します。&lt;br&gt;&lt;br&gt;① 接続：結果の公開先。② 自動化：いつ実行するか。③ 実行パラメータ：上級者向け。不明なら既定値のまま。</string>
+    <string name="cf_optimizer_tips_params">除外／対象国：2 文字の ISO 地域コード。IP の Cloudflare trace の所在地で判定します。trace に失敗した候補は保持します（不明＝遮断ではない）。&lt;br&gt;1 回のソース数：毎回ミラーソースから抽出する数。&lt;br&gt;ソースあたりのサンプル：重複排除前に各ソースから取る行数。&lt;br&gt;候補上限：測定する IP 数（最も時間がかかる段階）。&lt;br&gt;アップロード条件：共有リストを上書きする前に必要な合格ノード数。&lt;br&gt;地域あたりの上限：1 つの Cloudflare 地域が寄与できるノード数。&lt;br&gt;ダウンロードテスト：最速候補の実スループットを測定（スコアの 40%）。</string>
+    <string name="cf_optimizer_download_test">ダウンロード速度テスト</string>
+    <string name="cf_optimizer_download_test_summary">最速の候補のみ実際のスループットを測定します（スコアの40%を占める帯域成分）。オフにすると通信量を節約できます。</string>
+    <string name="cf_optimizer_last_success">前回の成功 %1$s</string>
     <string name="cf_optimizer_exclude_countries">除外国（カンマ区切り）</string>
     <string name="cf_optimizer_only_countries">許可国（空で無効）</string>
     <string name="cf_optimizer_sources_per_run">1回のソース数</string>
@@ -291,6 +296,4 @@
     <string name="cf_optimizer_max_candidates">候補の上限</string>
     <string name="cf_optimizer_min_upload_entries">アップロード基準</string>
     <string name="cf_optimizer_max_per_region">地域あたりの上限</string>
-    <string name="cf_optimizer_status_title">実行状態</string>
-    <string name="cf_optimizer_status_idle">未実行</string>
 </resources>

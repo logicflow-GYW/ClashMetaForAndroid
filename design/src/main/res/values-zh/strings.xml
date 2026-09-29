@@ -300,6 +300,11 @@
     <string name="cf_optimizer_shared_list_title">共享列表确认</string>
     <string name="cf_optimizer_shared_list_message">Worker 的 ADD.txt 列表由使用同一 Worker 的所有设备和订阅共享。运行优选会用本机结果覆盖该列表。</string>
     <string name="cf_optimizer_params">运行参数</string>
+    <string name="cf_optimizer_tips_overview">在真实底层网络上探测 Cloudflare 候选 IP（不经过本应用自己的 VPN），评分后把胜出节点写入 Worker 共享列表，并刷新你绑定的订阅。&lt;br&gt;&lt;br&gt;① 连接：结果发布到哪里。② 自动化：什么时候自动跑。③ 运行参数：高级调优，不确定就保持默认。</string>
+    <string name="cf_optimizer_tips_params">排除国家／只选国家：两位 ISO 地区码，按 IP 的 Cloudflare trace 归属地判定；trace 失败的候选保留（未知不等于被封锁）。&lt;br&gt;每轮源数：每轮从镜像源池里抽取多少个源。&lt;br&gt;单源抽样：每个源在去重前取多少行。&lt;br&gt;候选上限：进入探测的 IP 数量（最慢的一步在这儿）。&lt;br&gt;上传门槛：至少要有多少个达标节点，才覆盖共享列表。&lt;br&gt;每地区上限：同一个 Cloudflare 地区最多贡献几个节点。&lt;br&gt;下载测速：对最快的候选实测吞吐量（占评分 40% 的带宽分量）。</string>
+    <string name="cf_optimizer_download_test">下载测速</string>
+    <string name="cf_optimizer_download_test_summary">对最快的一批候选实测吞吐量（补上评分里 40% 的带宽分量）。关闭可节省移动数据。</string>
+    <string name="cf_optimizer_last_success">上次成功 %1$s</string>
     <string name="cf_optimizer_exclude_countries">排除国家（逗号分隔）</string>
     <string name="cf_optimizer_only_countries">只选国家（留空不启用）</string>
     <string name="cf_optimizer_sources_per_run">每轮源数</string>
@@ -307,6 +312,4 @@
     <string name="cf_optimizer_max_candidates">候选上限</string>
     <string name="cf_optimizer_min_upload_entries">上传门槛</string>
     <string name="cf_optimizer_max_per_region">每地区上限</string>
-    <string name="cf_optimizer_status_title">运行状态</string>
-    <string name="cf_optimizer_status_idle">尚未运行</string>
 </resources>

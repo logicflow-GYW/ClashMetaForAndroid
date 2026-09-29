@@ -25,6 +25,7 @@
     <string name="cf_optimizer_stage_sources">Fetching source list</string>
     <string name="cf_optimizer_stage_probe">Probing %1$d/%2$d</string>
     <string name="cf_optimizer_stage_rank">Scoring candidates</string>
+    <string name="cf_optimizer_stage_download">Speed testing %1$d/%2$d</string>
     <string name="cf_optimizer_stage_upload">Uploading to worker</string>
     <string name="cf_optimizer_result_failure">CF optimizer failed: %1$s</string>
     <string name="cf_optimizer_result_profile_failed">List uploaded, profile update failed: %1$s</string>

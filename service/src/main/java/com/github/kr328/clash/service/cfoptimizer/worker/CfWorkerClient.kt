@@ -1,5 +1,8 @@
 package com.github.kr328.clash.service.cfoptimizer.worker
 
+import android.content.Context
+import android.net.Network
+import com.github.kr328.clash.service.cfoptimizer.net.PhysicalNetwork
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -61,7 +64,7 @@ class WorkerHttpResponse(
  */
 class CfWorkerClient(
     private val settings: CfWorkerSettings,
-    private val transport: WorkerHttpTransport = UrlConnectionWorkerHttpTransport(),
+    private val transport: WorkerHttpTransport,
 ) {
     suspend fun upload(entries: List<String>): WorkerUploadResult {
         // Fail closed: an empty list must never overwrite the shared remote list.
@@ -226,11 +229,15 @@ class CfWorkerClient(
  * cross-host (or any) redirect, so credentials and cookies can never leak to
  * another origin. Response bodies are capped.
  */
-class UrlConnectionWorkerHttpTransport : WorkerHttpTransport {
+class UrlConnectionWorkerHttpTransport(private val networkProvider: () -> Network?) : WorkerHttpTransport {
+    /** 便捷构造：按需取当前主物理网络（service 侧使用）。 */
+    constructor(context: Context) : this({ PhysicalNetwork.pick(context) })
+
     override suspend fun execute(request: WorkerHttpRequest): WorkerHttpResponse =
         withContext(Dispatchers.IO) {
+            val url = URL(request.url)
             val connection =
-                (URL(request.url).openConnection() as HttpURLConnection).apply {
+                (PhysicalNetwork.openConnection(networkProvider(), url) as HttpURLConnection).apply {
                     requestMethod = request.method
                     instanceFollowRedirects = false
                     connectTimeout = TIMEOUT_MILLIS

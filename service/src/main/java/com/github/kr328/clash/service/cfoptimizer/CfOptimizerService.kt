@@ -76,10 +76,14 @@ class CfOptimizerService : BaseService() {
                 }
             }
         } catch (e: Exception) {
+            StateStore(this).saveRunState(CfOptimizerCoordinator.STAGE_DONE, 0, 0)
             updateForegroundNotification(getString(R.string.running))
             notifyResult(getString(R.string.cf_optimizer_result_failure, e.message ?: "unknown"))
             return
         }
+
+        // 本轮结束标记：设置页的状态行据此从「进行中」切回「上次成功 …」。
+        StateStore(this).saveRunState(CfOptimizerCoordinator.STAGE_DONE, 0, 0)
 
         updateForegroundNotification(getString(R.string.running))
 
@@ -93,11 +97,13 @@ class CfOptimizerService : BaseService() {
         }
     }
 
-    /** 阶段进度 → 用户可读文本（拉源 / 探测 i/total / 评分 / 上传）。 */
+    /** 阶段进度 → 用户可读文本（拉源 / 探测 i/total / 下载测速 / 评分 / 上传）。 */
     private fun progressText(stage: String, progress: Int, total: Int): String = when (stage) {
         CfOptimizerCoordinator.STAGE_SOURCES -> getString(R.string.cf_optimizer_stage_sources)
         CfOptimizerCoordinator.STAGE_PROBE ->
             getString(R.string.cf_optimizer_stage_probe, progress, total)
+        CfOptimizerCoordinator.STAGE_DOWNLOAD ->
+            getString(R.string.cf_optimizer_stage_download, progress, total)
         CfOptimizerCoordinator.STAGE_RANK -> getString(R.string.cf_optimizer_stage_rank)
         CfOptimizerCoordinator.STAGE_UPLOAD -> getString(R.string.cf_optimizer_stage_upload)
         else -> getString(R.string.running)
