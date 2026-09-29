@@ -74,6 +74,7 @@ jobs:
       # Delete old Prerelease-alpha
       - uses: dev-drprasad/delete-tag-and-release@v1.1
         if: github.ref == 'refs/heads/main' && success()
+        continue-on-error: true
         with:
           tag_name: Prerelease-alpha
           github_token: ${{ secrets.GITHUB_TOKEN }}
