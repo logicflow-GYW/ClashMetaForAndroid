@@ -1,12 +1,10 @@
 package com.github.kr328.clash.service.cfoptimizer.probe
 
 import android.content.Context
-import android.net.ConnectivityManager
 import android.net.Network
-import android.net.NetworkCapabilities
-import androidx.core.content.getSystemService
 import com.github.kr328.clash.service.cfoptimizer.CandidateIp
 import com.github.kr328.clash.service.cfoptimizer.ProbeMetrics
+import com.github.kr328.clash.service.cfoptimizer.net.PhysicalNetwork
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -14,6 +12,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import java.io.BufferedInputStream
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.InetSocketAddress
@@ -41,7 +40,7 @@ class CfProbe(private val context: Context) {
         onProgress: suspend (done: Int, total: Int) -> Unit = { _, _ -> },
     ): Map<CandidateIp, ProbeMetrics> =
         withContext(Dispatchers.IO) {
-            val network = candidateNetworks().firstOrNull() ?: return@withContext emptyMap()
+            val network = primaryNetwork() ?: return@withContext emptyMap()
             val semaphore = Semaphore(PROBE_CONCURRENCY)
             var done = 0
 
@@ -100,6 +99,125 @@ class CfProbe(private val context: Context) {
             region = region,
         )
     }
+
+    /**
+     * 下载测速（原版 `speed.cloudflare.com/__down` 语义）：给 TTFB 已通过的候选补上吞吐指标，
+     * 让评分里占 40% 的带宽分量真正参与排序（此前该分量恒为 0，等于只按 TTFB 选节点）。
+     *
+     * 只对窄池做：调用方（协调器）传 TTFB 最优的 [DOWNLOAD_POOL_LIMIT] 个候选，
+     * 单次最多读 [DOWNLOAD_MAX_BYTES]、最长 [DOWNLOAD_MAX_MILLIS]，速率达标提前收工。
+     *
+     * 返回 `候选 -> Mbps`；失败候选不出现在结果里 —— 协调器保留其 TTFB 分量（带宽记 0），
+     * 不编造带宽，也不因为测速失败丢掉本来可用的节点。
+     */
+    suspend fun measureDownloads(
+        candidates: List<CandidateIp>,
+        onProgress: suspend (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): Map<CandidateIp, Double> = withContext(Dispatchers.IO) {
+        val network = primaryNetwork() ?: return@withContext emptyMap()
+        val semaphore = Semaphore(DOWNLOAD_CONCURRENCY)
+        var done = 0
+
+        coroutineScope {
+            candidates.map { candidate ->
+                async {
+                    semaphore.withPermit {
+                        val mbps = runCatching { measureOneDownload(network, candidate) }.getOrNull()
+
+                        synchronized(Unit) { done += 1 }
+                        runCatching { onProgress(done, candidates.size) }
+
+                        if (mbps == null) null else candidate to mbps
+                    }
+                }
+            }.awaitAll().filterNotNull().toMap()
+        }
+    }
+
+    /** 单候选下载测速：TLS（SNI/Host = speed.cloudflare.com）→ 跳过响应头 → 计时读 body。 */
+    private fun measureOneDownload(network: Network, candidate: CandidateIp): Double? {
+        val https = candidate.port in HTTPS_PORTS
+        val socket = network.socketFactory.createSocket()
+
+        try {
+            socket.tcpNoDelay = true
+            socket.connect(InetSocketAddress(candidate.address, candidate.port), CONNECT_TIMEOUT_MS)
+            socket.soTimeout = READ_TIMEOUT_MS
+
+            val io = if (https) {
+                val ssl = sslWrap(socket, DOWNLOAD_HOST, candidate.port)
+                ssl.startHandshake()
+                ssl
+            } else {
+                socket
+            }
+
+            val output = io.getOutputStream()
+            output.write(
+                ("GET $DOWNLOAD_PATH HTTP/1.1\r\n" +
+                        "Host: $DOWNLOAD_HOST\r\n" +
+                        "User-Agent: $USER_AGENT\r\n" +
+                        "Connection: close\r\n\r\n").toByteArray(Charsets.UTF_8)
+            )
+            output.flush()
+
+            val input = BufferedInputStream(io.getInputStream(), DOWNLOAD_BUFFER_BYTES)
+            if (!skipResponseHeaders(input)) return null
+
+            val start = System.nanoTime()
+            val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
+            var bytes = 0L
+
+            while (bytes < DOWNLOAD_MAX_BYTES) {
+                val want = minOf(buffer.size.toLong(), DOWNLOAD_MAX_BYTES - bytes).toInt()
+                val read = input.read(buffer, 0, want)
+                if (read < 0) break
+
+                bytes += read
+
+                val elapsedMs = (System.nanoTime() - start) / 1_000_000
+                if (elapsedMs >= DOWNLOAD_MAX_MILLIS) break
+                if (elapsedMs >= DOWNLOAD_EARLY_STOP_MIN_MILLIS && mbpsOf(bytes, elapsedMs) >= DOWNLOAD_EARLY_STOP_MBPS) {
+                    break
+                }
+            }
+
+            val elapsedMs = (System.nanoTime() - start) / 1_000_000
+            if (bytes <= 0 || elapsedMs <= 0) return null
+
+            return mbpsOf(bytes, elapsedMs)
+        } finally {
+            runCatching { socket.close() }
+        }
+    }
+
+    /**
+     * 读到空行结束响应头（`\r\n\r\n`）。超长头或 EOF 视为失败。
+     * 输出压缩不会发生：请求未带 Accept-Encoding。
+     */
+    private fun skipResponseHeaders(input: BufferedInputStream): Boolean {
+        var matched = 0
+        var consumed = 0
+
+        while (consumed < DOWNLOAD_MAX_HEADER_BYTES) {
+            val b = input.read()
+            if (b < 0) return false
+
+            consumed++
+            matched = when {
+                b == '\r'.code && (matched == 0 || matched == 2) -> matched + 1
+                b == '\n'.code && (matched == 1 || matched == 3) -> matched + 1
+                else -> 0
+            }
+
+            if (matched == 4) return true
+        }
+
+        return false
+    }
+
+    private fun mbpsOf(bytes: Long, elapsedMs: Long): Double =
+        bytes * 8.0 / (elapsedMs / 1000.0) / 1_000_000.0
 
     /**
      * 在绑定 network 的 socket 上做一次 HTTP GET，返回 (耗时ms, 响应文本可选)。
@@ -172,26 +290,14 @@ class CfProbe(private val context: Context) {
         return ssl
     }
 
-    /** 候选探测用网络：有 INTERNET 且**非 VPN**；Wi‑Fi 优先，其次蜂窝，其余次之。 */
-    fun candidateNetworks(): List<Network> {
-        val connectivity = context.getSystemService<ConnectivityManager>() ?: return emptyList()
+    /**
+     * 主物理网络（探测 / 源拉取 / Worker 上传统一使用同一条）。
+     * 实现委托 [PhysicalNetwork]：排除 VPN、Wi‑Fi 优先、蜂窝次之。
+     */
+    fun primaryNetwork(): Network? = PhysicalNetwork.pick(context)
 
-        return connectivity.allNetworks
-            .map { it to connectivity.getNetworkCapabilities(it) }
-            .filter { (_, caps) ->
-                caps != null &&
-                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                        !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
-            }
-            .sortedByDescending { (_, caps) ->
-                when {
-                    caps!!.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> 2
-                    caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> 1
-                    else -> 0
-                }
-            }
-            .map { it.first }
-    }
+    /** 候选探测用网络（保留给协调器做网络标签；语义同 [PhysicalNetwork.candidates]）。 */
+    fun candidateNetworks(): List<Network> = PhysicalNetwork.candidates(context)
 
     companion object {
         /** 探测目标 host（Cloudflare anycast 入口，SNI/Host 一致）。 */
@@ -207,10 +313,11 @@ class CfProbe(private val context: Context) {
         const val SAMPLE_GAP_MS: Long = 100
 
         /**
-         * 探测并发硬上限。移动网络 + 电量敏感；原脚本 50 workers，Android MVP 收敛到 8 ——
-         * 显式命名并附理由，不砍成魔数。
+         * 探测并发硬上限。原脚本 50 workers，Android 端取 12：
+         * 100 候选 ×（3 TTFB + 1 trace）在并发 12 下约 1~2 分钟跑完（并发 8 时接近 3 分钟），
+         * 再高会让移动网络排队、反而拉长尾延迟。数值显式命名并附理由，不砍成魔数。
          */
-        const val PROBE_CONCURRENCY: Int = 8
+        const val PROBE_CONCURRENCY: Int = 12
 
         /** 连接超时（毫秒）。公网 anycast 入口，5s 足够；超时候选本轮无指标。 */
         const val CONNECT_TIMEOUT_MS: Int = 5_000
@@ -220,6 +327,33 @@ class CfProbe(private val context: Context) {
 
         /** 地区缺失时的占位（不从 IP 反推地理位置）。 */
         const val REGION_FALLBACK: String = "ZZ"
+
+        /** 下载测速 host / 路径（与原脚本一致，走 CF 官方测速端点）。 */
+        const val DOWNLOAD_HOST: String = "speed.cloudflare.com"
+        const val DOWNLOAD_PATH: String = "/__down?bytes=3145728"
+
+        /**
+         * 参与下载测速的候选上限：只测 TTFB 最优的这么多（原脚本 TTFB_POOL_LIMIT 语义）。
+         * 20 × 3MB = 最坏 60MB 流量，通常早停远低于此；移动数据敏感用户可关掉下载测速。
+         */
+        const val DOWNLOAD_POOL_LIMIT: Int = 20
+
+        /** 下载测速并发：比探测低（每个连接都在持续吃带宽，并发高会互相抢）。 */
+        const val DOWNLOAD_CONCURRENCY: Int = 4
+
+        /** 单候选最多读的字节（3MB）—— 足够区分 30 / 150 Mbps 量级，又不至于烧流量。 */
+        const val DOWNLOAD_MAX_BYTES: Long = 3L * 1024 * 1024
+
+        /** 单候选最长测量时间（毫秒）。到点按已读字节数结算。 */
+        const val DOWNLOAD_MAX_MILLIS: Long = 4_000
+
+        /** 提前收工门槛：至少测 [DOWNLOAD_EARLY_STOP_MIN_MILLIS] 后速率已达标即停。 */
+        const val DOWNLOAD_EARLY_STOP_MBPS: Double = 120.0
+        const val DOWNLOAD_EARLY_STOP_MIN_MILLIS: Long = 1_000
+
+        /** 读缓冲与响应头上限。 */
+        private const val DOWNLOAD_BUFFER_BYTES: Int = 64 * 1024
+        private const val DOWNLOAD_MAX_HEADER_BYTES: Int = 8 * 1024
 
         /** 探测请求 UA（与原脚本一致）。 */
         const val USER_AGENT: String =

@@ -348,6 +348,11 @@
     <string name="cf_optimizer_shared_list_title">Подтверждение общего списка</string>
     <string name="cf_optimizer_shared_list_message">Список ADD.txt у Worker общий для всех устройств и подписок, использующих этот Worker. Запуск оптимизации перезапишет его результатами этого устройства.</string>
     <string name="cf_optimizer_params">Параметры запуска</string>
+    <string name="cf_optimizer_tips_overview">Проверяет кандидаты Cloudflare на реальной нижележащей сети (никогда через собственный VPN приложения), оценивает их, записывает лучшие в общий список Worker и обновляет привязанную подписку.&lt;br&gt;&lt;br&gt;① Подключение — куда публикуются результаты. ② Автоматизация — когда выполняется запуск. ③ Параметры запуска — тонкая настройка; если не уверены, оставьте значения по умолчанию.</string>
+    <string name="cf_optimizer_tips_params">Исключить / Только страны — двухбуквенные коды ISO по данным Cloudflare trace; кандидаты с неудачным trace сохраняются (неизвестно не значит заблокировано).&lt;br&gt;Источников за запуск — сколько зеркал опрашивать за раз.&lt;br&gt;Выборка из источника — сколько строк брать из каждого зеркала.&lt;br&gt;Лимит кандидатов — сколько IP проверяется (самый долгий этап).&lt;br&gt;Порог загрузки — минимум подходящих узлов до перезаписи общего списка.&lt;br&gt;Лимит на регион — сколько узлов может дать один регион Cloudflare.&lt;br&gt;Тест загрузки — измеряет реальную пропускную способность (40 % оценки).</string>
+    <string name="cf_optimizer_download_test">Тест скорости загрузки</string>
+    <string name="cf_optimizer_download_test_summary">Измеряет реальную пропускную способность быстрейших кандидатов (40 % оценки). Отключите для экономии мобильного трафика.</string>
+    <string name="cf_optimizer_last_success">Последний успех %1$s</string>
     <string name="cf_optimizer_exclude_countries">Исключённые страны (через запятую)</string>
     <string name="cf_optimizer_only_countries">Только эти страны (пусто = выкл.)</string>
     <string name="cf_optimizer_sources_per_run">Источников за запуск</string>
@@ -355,6 +360,4 @@
     <string name="cf_optimizer_max_candidates">Лимит кандидатов</string>
     <string name="cf_optimizer_min_upload_entries">Порог загрузки</string>
     <string name="cf_optimizer_max_per_region">Максимум на регион</string>
-    <string name="cf_optimizer_status_title">Статус запуска</string>
-    <string name="cf_optimizer_status_idle">Ещё не запускалось</string>
 </resources>

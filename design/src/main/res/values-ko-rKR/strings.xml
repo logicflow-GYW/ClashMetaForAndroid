@@ -284,6 +284,11 @@
     <string name="cf_optimizer_shared_list_title">공유 목록 확인</string>
     <string name="cf_optimizer_shared_list_message">Worker의 ADD.txt 목록은 동일한 Worker를 사용하는 모든 기기와 구독에서 공유됩니다. 최적화를 실행하면 이 기기의 결과로 덮어씁니다.</string>
     <string name="cf_optimizer_params">실행 매개변수</string>
+    <string name="cf_optimizer_tips_overview">실제 하위 네트워크에서 Cloudflare 후보 IP를 측정하고(이 앱 자체 VPN을 거치지 않음), 점수를 매겨 우승 노드를 Worker 공유 목록에 기록한 뒤 바인딩된 구독을 갱신합니다.&lt;br&gt;&lt;br&gt;① 연결: 결과가 게시되는 위치. ② 자동화: 언제 실행되는지. ③ 실행 매개변수: 고급 조정, 확실하지 않으면 기본값 유지.</string>
+    <string name="cf_optimizer_tips_params">제외/선택 국가: 두 글자 ISO 지역 코드이며 IP의 Cloudflare trace 위치로 판정합니다. trace 실패 후보는 유지합니다(미확인은 차단이 아님).&lt;br&gt;회당 소스 수: 매회 미러 소스에서 추출할 개수.&lt;br&gt;소스당 샘플: 중복 제거 전에 각 소스에서 가져올 줄 수.&lt;br&gt;후보 상한: 측정할 IP 수(가장 오래 걸리는 단계).&lt;br&gt;업로드 기준: 공유 목록을 덮어쓰기 전에 필요한 최소 합격 노드 수.&lt;br&gt;지역당 상한: 하나의 Cloudflare 지역이 기여할 수 있는 노드 수.&lt;br&gt;다운로드 테스트: 가장 빠른 후보의 실제 처리량 측정(점수의 40%).</string>
+    <string name="cf_optimizer_download_test">다운로드 속도 테스트</string>
+    <string name="cf_optimizer_download_test_summary">가장 빠른 후보의 실제 처리량을 측정합니다(점수의 40%를 차지하는 대역폭 항목). 끄면 모바일 데이터를 절약합니다.</string>
+    <string name="cf_optimizer_last_success">마지막 성공 %1$s</string>
     <string name="cf_optimizer_exclude_countries">제외 국가(쉼표 구분)</string>
     <string name="cf_optimizer_only_countries">허용 국가(비우면 비활성)</string>
     <string name="cf_optimizer_sources_per_run">실행당 소스 수</string>
@@ -291,6 +296,4 @@
     <string name="cf_optimizer_max_candidates">후보 한도</string>
     <string name="cf_optimizer_min_upload_entries">업로드 기준</string>
     <string name="cf_optimizer_max_per_region">지역당 한도</string>
-    <string name="cf_optimizer_status_title">실행 상태</string>
-    <string name="cf_optimizer_status_idle">실행 기록 없음</string>
 </resources>

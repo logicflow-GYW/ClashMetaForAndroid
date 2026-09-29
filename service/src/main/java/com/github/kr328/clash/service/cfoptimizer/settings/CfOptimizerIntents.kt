@@ -6,5 +6,5 @@ package com.github.kr328.clash.service.cfoptimizer.settings
  * integration module (D), not to settings.
  */
 object CfOptimizerIntents {
-    const val ACTION_RUN_NOW = "com.github.metacubex.clash.action.RUN_CF_OPTIMIZER"
+    const val ACTION_RUN_NOW = "cc.logicflash.clashpilot.action.RUN_CF_OPTIMIZER"
 }

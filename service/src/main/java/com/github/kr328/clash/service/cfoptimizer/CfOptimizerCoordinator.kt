@@ -2,12 +2,14 @@ package com.github.kr328.clash.service.cfoptimizer
 
 import android.content.Context
 import com.github.kr328.clash.service.ProfileProcessor
+import com.github.kr328.clash.service.cfoptimizer.net.PhysicalNetwork
 import com.github.kr328.clash.service.cfoptimizer.probe.CfProbe
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsStore
 import com.github.kr328.clash.service.cfoptimizer.settings.KeystoreCfOptimizerSecretStore
 import com.github.kr328.clash.service.cfoptimizer.source.CfCandidateSource
 import com.github.kr328.clash.service.cfoptimizer.worker.CfWorkerClient
 import com.github.kr328.clash.service.cfoptimizer.worker.CfWorkerSettings
+import com.github.kr328.clash.service.cfoptimizer.worker.UrlConnectionWorkerHttpTransport
 import com.github.kr328.clash.service.cfoptimizer.worker.WorkerUploadResult
 import kotlinx.coroutines.delay
 import java.util.UUID
@@ -57,6 +59,12 @@ class CfOptimizerCoordinator(private val context: Context) {
         val maxCandidates = settingsStore.maxCandidates
         val minUploadEntries = settingsStore.minUploadEntries
         val maxPerRegion = settingsStore.maxPerRegion
+        val downloadTestEnabled = settingsStore.downloadTestEnabled
+
+        // 物理网络出口：本模块**所有** Java 侧网络 I/O（拉源 / 探测 / 上传）统一绑它。
+        // 不绑的后果（真机实测）：开着代理时请求回流进本应用 TUN → 被自己的规则送进代理
+        // 节点 → 上传失败/超时，而关掉代理就一切正常。
+        val physicalNetwork = PhysicalNetwork.pick(context)
 
         // 1. 源发现（导航站 → 缓存 → 内置兜底）+ 拉取候选。
         val state = StateStore(context)
@@ -64,7 +72,7 @@ class CfOptimizerCoordinator(private val context: Context) {
         onProgress(STAGE_SOURCES, 0, 0)
 
         val discovered = try {
-            CfCandidateSource.discoverSourceUrls()
+            CfCandidateSource.discoverSourceUrls(physicalNetwork)
         } catch (e: Exception) {
             emptyList()
         }
@@ -82,6 +90,7 @@ class CfOptimizerCoordinator(private val context: Context) {
                 excludedRegions = excludeCountries,
                 perSourceSample = perSourceSample,
                 maxCandidates = maxCandidates,
+                network = physicalNetwork,
             )
         } catch (e: Exception) {
             return Result(0, 0, false, "candidates_${e.javaClass.simpleName}", false, null)
@@ -119,15 +128,44 @@ class CfOptimizerCoordinator(private val context: Context) {
             true
         }
 
-        // 3. 引擎评分。下载测速本轮默认关：metrics.downloadMbps 全为 0，
-        //    评分只含 TTFB 分量（上限 60），门槛分按 30/60 比例折半为 15，
-        //    排序仍由 TTFB 主导，不因关闭下载而把所有候选拦在门外。
+        // 2.7 下载测速（默认开）：评分公式里带宽占 40%，此前该分量恒为 0 —— 等于只按
+        //     延迟选节点。只测 TTFB 最优的窄池（原脚本 TTFB_POOL_LIMIT 语义），
+        //     控制手机流量；测速失败的候选保留 TTFB 分量（不编造带宽、不丢节点）。
+        val downloads = if (downloadTestEnabled && probed.isNotEmpty()) {
+            val pool = probed
+                .mapNotNull { candidate -> metrics[candidate]?.let { candidate to it.ttfbMs } }
+                .sortedBy { it.second }
+                .take(CfProbe.DOWNLOAD_POOL_LIMIT)
+                .map { it.first }
+
+            state.saveRunState(STAGE_DOWNLOAD, 0, pool.size)
+            onProgress(STAGE_DOWNLOAD, 0, pool.size)
+
+            probe.measureDownloads(pool) { done, total ->
+                state.saveRunState(STAGE_DOWNLOAD, done, total)
+                onProgress(STAGE_DOWNLOAD, done, total)
+            }
+        } else {
+            emptyMap()
+        }
+
+        val scoredMetrics = if (downloads.isEmpty()) {
+            metrics
+        } else {
+            metrics.mapValues { (candidate, m) ->
+                downloads[candidate]?.let { mbps -> m.copy(downloadMbps = mbps) } ?: m
+            }
+        }
+
+        // 3. 引擎评分。门槛分随「下载测速开/关」切换量纲：开 = 完整 30 分基线；
+        //    关 = 按 30/60 等比折半为 15，否则会把所有候选拦在门外。
         //    maxPerRegion（原版 SMART_PUSH_IPS_PER_CC）：防单地区垄断 Worker 列表。
         state.saveRunState(STAGE_RANK, probed.size, allCandidates.size)
         onProgress(STAGE_RANK, probed.size, allCandidates.size)
 
-        val limits = OptimizerLimits(minScore = DOWNLOAD_OFF_MIN_SCORE, maxPerRegion = maxPerRegion)
-        var ranked = CfOptimizerEngine.rank(probed, metrics, limits)
+        val minScore = if (downloadTestEnabled) DOWNLOAD_ON_MIN_SCORE else DOWNLOAD_OFF_MIN_SCORE
+        val limits = OptimizerLimits(minScore = minScore, maxPerRegion = maxPerRegion)
+        var ranked = CfOptimizerEngine.rank(probed, scoredMetrics, limits)
 
         // 3.5 CIDR /24 前缀去重（原版 cidr_seen 语义）：同一 /24 只保留最高分，
         //     让 Worker 列表分散在不同网段；去重后不足质量门则不上传。
@@ -141,12 +179,15 @@ class CfOptimizerCoordinator(private val context: Context) {
         //    本轮优选行在后。空列表不上传（客户端 fail closed，双保险）。
         state.saveRunState(STAGE_UPLOAD, 0, 1)
         onProgress(STAGE_UPLOAD, 0, 1)
-        val networkTag = probeTag(probe)
+        val networkTag = PhysicalNetwork.transportTag(context, physicalNetwork)
         val entries = settingsStore.customEntries.orEmpty().filter { it.isNotBlank() } +
                 ranked.map { it.toWorkerLine(networkTag) }
 
         // 5. 上传 Worker（整体覆写语义：只在本轮有达标结果时才覆盖）。
-        val client = CfWorkerClient(CfWorkerSettings(baseUrl, password))
+        val client = CfWorkerClient(
+            CfWorkerSettings(baseUrl, password),
+            UrlConnectionWorkerHttpTransport(context),
+        )
         val uploadResult = client.upload(entries)
 
         val uploaded = uploadResult is WorkerUploadResult.Success
@@ -216,25 +257,11 @@ class CfOptimizerCoordinator(private val context: Context) {
         ProfileProcessor.update(context, uuid, null)
     }
 
-    /** 网络标签：按探测用网络的传输类型命名（Wi‑Fi/Cellular），不从 IP 猜。 */
-    private fun probeTag(probe: CfProbe): String {
-        val network = probe.candidateNetworks().firstOrNull() ?: return DEFAULT_TAG
-
-        val connectivity = context.getSystemService(android.net.ConnectivityManager::class.java)
-            ?: return DEFAULT_TAG
-        val caps = connectivity.getNetworkCapabilities(network) ?: return DEFAULT_TAG
-
-        return when {
-            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "WiFi"
-            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "Cellular"
-            else -> DEFAULT_TAG
-        }
-    }
-
     companion object {
-        /** 运行阶段标识（状态框 + 前台通知的确定性反馈来源）。 */
+        /** 运行阶段标识（状态行 + 前台通知的确定性反馈来源）。 */
         const val STAGE_SOURCES: String = "sources"
         const val STAGE_PROBE: String = "probe"
+        const val STAGE_DOWNLOAD: String = "download"
         const val STAGE_RANK: String = "rank"
         const val STAGE_UPLOAD: String = "upload"
         const val STAGE_DONE: String = "done"
@@ -247,6 +274,9 @@ class CfOptimizerCoordinator(private val context: Context) {
          * 关闭下载时评分只含 TTFB 分量，不折半会把所有候选拦在门外。
          */
         const val DOWNLOAD_OFF_MIN_SCORE: Double = 15.0
+
+        /** 下载测速开启时的门槛分（完整量纲，与原脚本一致）。 */
+        const val DOWNLOAD_ON_MIN_SCORE: Double = 30.0
     }
 }
 

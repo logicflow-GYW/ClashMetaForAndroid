@@ -1,8 +1,8 @@
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="PluralsCandidate">
-    <string name="launch_name_meta">Clash Meta</string>
-    <string name="launch_name_alpha">Clash Meta Alpha</string>
-    <string name="application_name_meta">Clash Meta for Android</string>
-    <string name="application_name_alpha">Clash Meta for Android Alpha</string>
+    <string name="launch_name_meta">ClashPilot</string>
+    <string name="launch_name_alpha">ClashPilot Alpha</string>
+    <string name="application_name_meta">ClashPilot</string>
+    <string name="application_name_alpha">ClashPilot Alpha</string>
 
     <string name="stopped">Stopped</string>
     <string name="tap_to_start">Tap to start</string>
@@ -391,6 +391,11 @@
     <string name="cf_optimizer_shared_list_title">Shared list confirmation</string>
     <string name="cf_optimizer_shared_list_message">The Worker ADD.txt list is shared across all devices and subscriptions using this Worker. Running the optimizer will overwrite it with this device\'s results.</string>
     <string name="cf_optimizer_params">Run parameters</string>
+    <string name="cf_optimizer_tips_overview">Probes Cloudflare candidate IPs on the real underlying network (never through this app\'s own VPN), scores them, writes the winners into the Worker shared list, then refreshes the bound subscription.&lt;br&gt;&lt;br&gt;① Connection — where the results are published. ② Automation — when a run happens. ③ Run parameters — advanced tuning; leave the defaults if unsure.</string>
+    <string name="cf_optimizer_tips_params">Exclude / Only countries — two-letter ISO region codes, matched against the IP\'s Cloudflare trace location; candidates whose trace failed are kept (unknown is not the same as blocked).&lt;br&gt;Sources per run — how many mirror lists to sample each run.&lt;br&gt;Per-source sample — lines taken from each list before de-duplication.&lt;br&gt;Candidate limit — how many IPs get probed (the slowest stage).&lt;br&gt;Upload gate — minimum qualifying nodes required before overwriting the shared list.&lt;br&gt;Per-region cap — how many nodes a single Cloudflare region may contribute.&lt;br&gt;Download test — measures real throughput on the fastest candidates (the 40% bandwidth term of the score).</string>
+    <string name="cf_optimizer_download_test">Download speed test</string>
+    <string name="cf_optimizer_download_test_summary">Measure real throughput on the fastest candidates (adds the 40% bandwidth term of the score). Turn off to save mobile data.</string>
+    <string name="cf_optimizer_last_success">Last success %1$s</string>
     <string name="cf_optimizer_exclude_countries">Excluded countries</string>
     <string name="cf_optimizer_only_countries">Only these countries</string>
     <string name="cf_optimizer_sources_per_run">Sources per run</string>
@@ -398,6 +403,4 @@
     <string name="cf_optimizer_max_candidates">Candidate limit</string>
     <string name="cf_optimizer_min_upload_entries">Upload quality gate</string>
     <string name="cf_optimizer_max_per_region">Max per region</string>
-    <string name="cf_optimizer_status_title">Run status</string>
-    <string name="cf_optimizer_status_idle">Never run</string>
 </resources>

@@ -98,13 +98,13 @@ class CfOptimizerSettingsStore(context: Context) {
             .filter { it.length == 2 }
             .toSet()
 
-    /** 每轮从源池抽取的源数（原版动态通讯录；手机端有界化默认 4）。 */
+    /** 每轮从源池抽取的源数（原版动态通讯录；默认 8——源池约百个，多抽几个只多几 KB 流量）。 */
     var sourcesPerRunRaw: String by store.string(
         key = "cfoptimizer_sources_per_run",
-        defaultValue = "4",
+        defaultValue = "8",
     )
 
-    val sourcesPerRun: Int get() = sourcesPerRunRaw.toIntOrNull() ?: 4
+    val sourcesPerRun: Int get() = sourcesPerRunRaw.toIntOrNull() ?: 8
 
     /** 单源抽样条数（原版 sample_limit 的手机端等比；默认 40）。 */
     var perSourceSampleRaw: String by store.string(
@@ -114,21 +114,21 @@ class CfOptimizerSettingsStore(context: Context) {
 
     val perSourceSample: Int get() = perSourceSampleRaw.toIntOrNull() ?: 40
 
-    /** 每轮进入探测的候选上限（默认 100）。 */
+    /** 每轮进入探测的候选上限（默认 80：探测是耗时大头，100 → 80 让整轮稳定在 1~2 分钟）。 */
     var maxCandidatesRaw: String by store.string(
         key = "cfoptimizer_max_candidates",
-        defaultValue = "100",
+        defaultValue = "80",
     )
 
-    val maxCandidates: Int get() = maxCandidatesRaw.toIntOrNull() ?: 100
+    val maxCandidates: Int get() = maxCandidatesRaw.toIntOrNull() ?: 80
 
-    /** 上传质量门（原版 SMART_PUSH_MIN_NODES=2；这里默认 3 防侥幸覆盖）。 */
+    /** 上传质量门（原版 SMART_PUSH_MIN_NODES=2；这里默认 5 防侥幸覆盖共享列表）。 */
     var minUploadEntriesRaw: String by store.string(
         key = "cfoptimizer_min_upload_entries",
-        defaultValue = "3",
+        defaultValue = "5",
     )
 
-    val minUploadEntries: Int get() = minUploadEntriesRaw.toIntOrNull() ?: 3
+    val minUploadEntries: Int get() = minUploadEntriesRaw.toIntOrNull() ?: 5
 
     /** 每地区最多保留条数（原版 SMART_PUSH_IPS_PER_CC=2）。 */
     var maxPerRegionRaw: String by store.string(
@@ -137,6 +137,15 @@ class CfOptimizerSettingsStore(context: Context) {
     )
 
     val maxPerRegion: Int get() = maxPerRegionRaw.toIntOrNull() ?: 2
+
+    /**
+     * 下载测速（默认开）：对 TTFB 最优的窄池测吞吐，补上评分里占 40% 的带宽分量。
+     * 关掉可以省流量（单次最多约 20 × 3MB），但排序会退化成纯延迟排序。
+     */
+    var downloadTestEnabled: Boolean by store.boolean(
+        key = "cfoptimizer_download_test_enabled",
+        defaultValue = true,
+    )
 
     private val customEntriesDelegate by store.string(
         key = "cfoptimizer_custom_entries",

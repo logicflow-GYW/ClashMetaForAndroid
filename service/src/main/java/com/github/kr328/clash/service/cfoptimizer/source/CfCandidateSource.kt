@@ -1,6 +1,8 @@
 package com.github.kr328.clash.service.cfoptimizer.source
 
+import android.net.Network
 import com.github.kr328.clash.service.cfoptimizer.CandidateIp
+import com.github.kr328.clash.service.cfoptimizer.net.PhysicalNetwork
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.InetAddress
@@ -79,6 +81,7 @@ object CfCandidateSource {
         excludedRegions: Set<String> = EXCLUDED_SOURCE_REGIONS,
         perSourceSample: Int = PER_SOURCE_SAMPLE,
         maxCandidates: Int = MAX_CANDIDATES,
+        network: Network? = null,
     ): List<CandidateIp> {
         val rnd = Random(System.nanoTime())
 
@@ -87,7 +90,7 @@ object CfCandidateSource {
 
         for (url in sources) {
             try {
-                val lines = downloadLines(url)
+                val lines = downloadLines(network, url)
                     .shuffled(rnd)
                     .take(perSourceSample.coerceIn(1, 500))
 
@@ -109,11 +112,11 @@ object CfCandidateSource {
     /**
      * 源发现：抓取导航站并提取 .txt IP 源链接。失败抛 [IOException]（调用方走缓存/内置兜底）。
      */
-    fun discoverSourceUrls(): List<String> = scrapeNavigationSite()
+    fun discoverSourceUrls(network: Network? = null): List<String> = scrapeNavigationSite(network)
 
     /** 抓取导航站并提取 .txt IP 源链接（原版 scrape `<span class="url-text">` 语义）。 */
-    private fun scrapeNavigationSite(): List<String> {
-        val html = downloadText(NAVIGATION_URL, MAX_SOURCE_BYTES)
+    private fun scrapeNavigationSite(network: Network?): List<String> {
+        val html = downloadText(network, NAVIGATION_URL, MAX_SOURCE_BYTES)
 
         val regex = Regex("""<span class="url-text">(.*?)</span>""")
 
@@ -138,11 +141,16 @@ object CfCandidateSource {
             .toList()
 
     /** 下载并按行返回（8s 读超时；字节截断兜底）。失败抛 [IOException]。 */
-    private fun downloadLines(url: String): List<String> =
-        downloadText(url, MAX_SOURCE_BYTES).lineSequence().filter { it.isNotBlank() }.toList()
+    private fun downloadLines(network: Network?, url: String): List<String> =
+        downloadText(network, url, MAX_SOURCE_BYTES).lineSequence().filter { it.isNotBlank() }.toList()
 
-    private fun downloadText(url: String, maxBytes: Int): String {
-        val connection = URL(url).openConnection() as HttpURLConnection
+    /**
+     * 下载文本源。连接**固定走物理网络**（[PhysicalNetwork]）：开着代理时裸
+     * `URL.openConnection()` 会回流进本应用 TUN，被自己的规则送进代理节点，
+     * 表现为「关代理顺利、开代理拉源失败」。
+     */
+    private fun downloadText(network: Network?, url: String, maxBytes: Int): String {
+        val connection = PhysicalNetwork.openConnection(network, URL(url)) as HttpURLConnection
 
         connection.connectTimeout = CONNECT_TIMEOUT_MS
         connection.readTimeout = READ_TIMEOUT_MS
