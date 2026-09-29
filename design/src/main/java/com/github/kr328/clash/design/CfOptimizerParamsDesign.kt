@@ -3,12 +3,7 @@ package com.github.kr328.clash.design
 import android.content.Context
 import android.view.View
 import com.github.kr328.clash.design.databinding.DesignSettingsCfOptimizerParamsBinding
-import com.github.kr328.clash.design.preference.NullableTextAdapter
-import com.github.kr328.clash.design.preference.TextAdapter
-import com.github.kr328.clash.design.preference.editableText
-import com.github.kr328.clash.design.preference.editableTextList
-import com.github.kr328.clash.design.preference.preferenceScreen
-import com.github.kr328.clash.design.preference.switch
+import com.github.kr328.clash.design.preference.*
 import com.github.kr328.clash.design.util.applyFrom
 import com.github.kr328.clash.design.util.bindAppBarElevation
 import com.github.kr328.clash.design.util.layoutInflater
