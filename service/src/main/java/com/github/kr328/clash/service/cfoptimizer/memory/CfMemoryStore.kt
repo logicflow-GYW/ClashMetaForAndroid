@@ -13,7 +13,7 @@ import java.util.TimeZone
  * 并发模型：只在 service 进程使用，一把锁 + 内存缓存；写盘用「临时文件 + rename」保证
  * 原子性，进程被杀不会留下半个 JSON（记忆库损坏 = 白攒）。
  */
-class CfMemoryStore(context: Context) {
+class CfMemoryStore(context: Context, private val tuning: CfMemoryTuning = CfMemoryTuning()) {
     private val directory = File(context.filesDir, DIR_NAME)
     private val file = File(directory, FILE_NAME)
     private val lock = Any()
@@ -56,6 +56,7 @@ class CfMemoryStore(context: Context) {
                 rangeOk = rangeOk,
                 stage = stage,
                 zone = zone,
+                tuning = tuning,
             )
         }
     }
@@ -66,23 +67,23 @@ class CfMemoryStore(context: Context) {
         nowSeconds: Long = nowSeconds(),
         zone: TimeZone = TimeZone.getDefault(),
     ): List<PriorityCandidate> = synchronized(lock) {
-        CfMemoryScoring.priorityCandidates(loadLocked(), nowSeconds, topN, zone)
+        CfMemoryScoring.priorityCandidates(loadLocked(), nowSeconds, topN, zone, tuning)
     }
 
     /**
-     * 已被判定为"不该再浪费探测配额"的地址集合（连续失败 ≥ [CfMemoryScoring.MAX_FAIL_STREAK]）。
+     * 已被判定为"不该再浪费探测配额"的地址集合（连续失败 ≥ [CfMemoryTuning.maxFailStreak]）。
      *
      * 与原版的**已声明偏差**：原版对 fail_streak 达标的记录做的是"永久移出优先候选"，
      * 而我们从上游源拿到的是一个远大于记忆库的随机 IP 池 —— 永久屏蔽会把配额浪费在
-     * 已经证伪过的地址上。这里加冷却期：超过 [CfMemoryScoring.STALE_DAYS] / 2 天没再失败的
+     * 已经证伪过的地址上。这里加冷却期：超过 [CfMemoryTuning.staleDays] / 2 天没再失败的
      * 记录放行复测一次（网络变好、路由变化都可能让它复活）。
      */
     fun blockedAddresses(nowSeconds: Long = nowSeconds()): Set<String> = synchronized(lock) {
-        val cooldownSeconds = (CfMemoryScoring.STALE_DAYS / 2 * 86_400).toLong()
+        val cooldownSeconds = (tuning.staleDays / 2 * 86_400).toLong()
 
         loadLocked()
             .filter { (_, record) ->
-                record.failStreak >= CfMemoryScoring.MAX_FAIL_STREAK &&
+                record.failStreak >= tuning.maxFailStreak &&
                     (nowSeconds - record.lastSeen) < cooldownSeconds
             }
             .keys
@@ -97,8 +98,8 @@ class CfMemoryStore(context: Context) {
         synchronized(lock) {
             val db = loadLocked()
 
-            CfMemoryScoring.pruneStale(db, nowSeconds)
-            CfMemoryScoring.evictOverflow(db, nowSeconds)
+            CfMemoryScoring.pruneStale(db, nowSeconds, tuning)
+            CfMemoryScoring.evictOverflow(db, nowSeconds, tuning)
 
             writeLocked(db)
         }

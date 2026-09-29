@@ -31,30 +31,22 @@ object CfOptimizerEngine {
     const val REGION_FALLBACK: String = "ZZ"
 
     /**
-     * 便宜层（原始候选池）相对昂贵层（TTFB 探测上限）的倍数。
-     *
-     * 依据（2026-09-29 改为实测值）：原版真机日志给出这批源（bestcf / zip.cm 精选列表，不是随机 CIDR）
-     * 的 **TCP 存活率 71.4%** —— 6397 个候选存活 4566 个。原注释里「存活率约 5–15%」的假设是错的，
-     * 据此定的 10 倍会这样失效：原始池 3000 → 约 2100 存活，而昂贵层只探 300 →
-     * **86% 的存活节点连测都没测就被随机丢掉**，白付 TCP 那一段的钱。
-     *
-     * 取 2 倍：`maxCandidates=600` → 原始池 1200 → 约 850 存活 → 探 600（覆盖约 70%），
-     * 覆盖率与耗时同时优于旧的 10 倍。只有存活率极低（随机 CIDR 盲扫，约 1–5%）时才需要调大。
-     */
-    const val RAW_POOL_FACTOR: Int = 2
-
-    /**
      * 便宜层的绝对上限。池子再大，TCP 预筛也是一次一次建连，不会更快，只多占内存与时间；
      * 20000 相当于把昂贵层上限拉到 2000 时的原始池，超出部分按随机顺序丢弃。
+     *
+     * **不可调**：它是保护手机的天花板，不是调优旋钮（可调的是倍数，见
+     * `CfOptimizerTuning.RAW_POOL_FACTOR_DEFAULT`）。
      */
     const val RAW_POOL_CEILING: Int = 20_000
 
     /**
-     * 由昂贵层上限推导便宜层上限（两层配额，见 [RAW_POOL_FACTOR]）。
+     * 由昂贵层上限推导便宜层上限（两层配额）。[factor] 由调用方传入（用户可调）：
+     * 默认值与推导依据在 `CfOptimizerTuning`，这里只做算术与封顶。
+     *
      * 传入值非法（≤0）时按 1 处理 —— 只放行、不放大用户填错的参数。
      */
-    fun rawPoolLimit(maxCandidates: Int): Int =
-        (maxCandidates.coerceAtLeast(1) * RAW_POOL_FACTOR).coerceAtMost(RAW_POOL_CEILING)
+    fun rawPoolLimit(maxCandidates: Int, factor: Int): Int =
+        (maxCandidates.coerceAtLeast(1) * factor.coerceAtLeast(1)).coerceAtMost(RAW_POOL_CEILING)
 
     /**
      * 对候选做校验、指标过滤、评分与排序，返回最多 [OptimizerLimits.maxEntries] 条结果。
@@ -96,7 +88,7 @@ object CfOptimizerEngine {
             if (m.ttfbMs > limits.maxTtfbMs) continue
             if (m.jitterMs > limits.maxJitterMs) continue
             if (m.downloadMbps < limits.minDownloadMbps) continue
-            val score = scoreOf(m)
+            val score = scoreOf(m, limits.weights)
             if (score < limits.minScore) continue
             val entry = OptimizedEntry(
                 address = address,
@@ -124,10 +116,11 @@ object CfOptimizerEngine {
         return capped.take(limits.maxEntries)
     }
 
-    /** 按原脚本公式计算 0–100 分。 */
-    fun scoreOf(m: ProbeMetrics): Double {
-        val ttfbPart = 0.6 * maxOf(0.0, 1.0 - m.ttfbMs / SCORE_TTFB_REF_MS)
-        val bwPart = 0.4 * minOf(1.0, m.downloadMbps / SCORE_BW_REF_MBPS)
+    /** 按原脚本公式计算 0–100 分（权重可调；按权重和归一化，满分恒 100）。 */
+    fun scoreOf(m: ProbeMetrics, weights: ScoreWeights = ScoreWeights()): Double {
+        val w = weights.normalized
+        val ttfbPart = w.ttfb * maxOf(0.0, 1.0 - m.ttfbMs / SCORE_TTFB_REF_MS)
+        val bwPart = w.bw * minOf(1.0, m.downloadMbps / SCORE_BW_REF_MBPS)
         return (ttfbPart + bwPart) * 100.0
     }
 

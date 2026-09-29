@@ -199,16 +199,22 @@ fun main() {
         orderMetrics, OptimizerLimits(maxEntries = 2))
     check("maxEntries=2 truncates to 2", truncated.size == 2 && truncated[0].address == "5.6.7.8")
 
-    // ---- 10. 两层配额（便宜层上限 = 昂贵层 × 10，硬上限 20000）----
-    // 期望值写死：RAW_POOL_FACTOR 于 2026-09-29 由 10 改为 2（依据原版真机日志实测的 71.4% TCP 存活率，
-    // 见 CfOptimizerEngine.RAW_POOL_FACTOR 的注释）。改动因子就**应该**打红这里 —— 这是刻意的。
-    check("rawPoolLimit(600) = 1200", CfOptimizerEngine.rawPoolLimit(600) == 1200)
-    check("rawPoolLimit(80) = 160", CfOptimizerEngine.rawPoolLimit(80) == 160)
-    check("rawPoolLimit(10000) = 20000（正好在上限）", CfOptimizerEngine.rawPoolLimit(10000) == 20000)
-    check("rawPoolLimit(5000) = 10000（未到上限）", CfOptimizerEngine.rawPoolLimit(5000) == 10000)
-    check("rawPoolLimit(0) = 2（非法输入只放行不放大）", CfOptimizerEngine.rawPoolLimit(0) == 2)
-    check("rawPoolLimit(-5) = 2（负数同样只放行不放大）", CfOptimizerEngine.rawPoolLimit(-5) == 2)
-    check("rawPoolLimit 单调不减", CfOptimizerEngine.rawPoolLimit(1) <= CfOptimizerEngine.rawPoolLimit(600))
+    // ---- 10. 两层配额（便宜层上限 = 昂贵层 × 倍数，硬上限 20000）----
+    // 倍数自 2026-09-29 起由用户可调（设置项 raw_pool_factor，默认 2，见 CfOptimizerTuning）。
+    // 这里**显式传字面量因子**，不从常量推导：默认值被改动时，下面这组期望值不会跟着变，
+    // 而是由 CfOptimizerTuningHarness 里那条"默认值 == 2"的字面量断言负责打红。
+    check("rawPoolLimit(600, 2) = 1200", CfOptimizerEngine.rawPoolLimit(600, 2) == 1200)
+    check("rawPoolLimit(80, 2) = 160", CfOptimizerEngine.rawPoolLimit(80, 2) == 160)
+    check("rawPoolLimit(600, 3) = 1800（用户调大倍数）", CfOptimizerEngine.rawPoolLimit(600, 3) == 1800)
+    check("rawPoolLimit(10000, 2) = 20000（正好在上限）", CfOptimizerEngine.rawPoolLimit(10000, 2) == 20000)
+    check("rawPoolLimit(5000, 2) = 10000（未到上限）", CfOptimizerEngine.rawPoolLimit(5000, 2) == 10000)
+    check("rawPoolLimit(0, 2) = 2（非法输入只放行不放大）", CfOptimizerEngine.rawPoolLimit(0, 2) == 2)
+    check("rawPoolLimit(-5, 2) = 2（负数同样只放行不放大）", CfOptimizerEngine.rawPoolLimit(-5, 2) == 2)
+    check("rawPoolLimit(600, 0) = 600（倍数非法按 1）", CfOptimizerEngine.rawPoolLimit(600, 0) == 600)
+    check("rawPoolLimit(600, 99) = 20000（倍数再大也被天花板截住）",
+        CfOptimizerEngine.rawPoolLimit(600, 99) == 20000)
+    check("rawPoolLimit 单调不减",
+        CfOptimizerEngine.rawPoolLimit(1, 2) <= CfOptimizerEngine.rawPoolLimit(600, 2))
 
     println("TOTAL=$total FAILURES=$failures")
     if (failures > 0) kotlin.system.exitProcess(1)
