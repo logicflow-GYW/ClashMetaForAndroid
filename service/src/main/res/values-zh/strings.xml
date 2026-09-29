@@ -16,4 +16,9 @@
     <string name="profile_updating">配置更新中</string>
     <string name="profile_service_status">配置文件服务状态</string>
     <string name="profile_process_result">配置文件处理结果</string>
+    <!-- CF optimizer (integration module) -->
+    <string name="cf_optimizer_service">CF 优选</string>
+    <string name="cf_optimizer_result_success">优选 %1$d 个节点，已上传成功</string>
+    <string name="cf_optimizer_result_failure">CF 优选失败: %1$s</string>
+    <string name="cf_optimizer_result_profile_failed">列表已上传，订阅更新失败: %1$s</string>
 </resources>

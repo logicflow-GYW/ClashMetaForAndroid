@@ -251,4 +251,22 @@
     <string name="import_from_qr">Nhập từ Mã QR</string>
     <string name="import_from_qr_no_permission">Quyền truy cập camera bị hạn chế. Vui lòng bật trong Cài đặt.</string>
     <string name="import_from_qr_exception">Đã xảy ra ngoại lệ hệ thống không xử lý được.</string>
+    <string name="cf_optimizer">Tối ưu CF</string>
+    <string name="cf_optimizer_enable">Bật tối ưu CF</string>
+    <string name="cf_optimizer_enable_summary">Tối ưu IP ứng viên Cloudflare và tự động cập nhật đăng ký</string>
+    <string name="cf_optimizer_worker_base_url">Địa chỉ Worker</string>
+    <string name="cf_optimizer_not_set">Chưa đặt</string>
+    <string name="cf_optimizer_url_invalid">Chỉ cho phép địa chỉ HTTPS</string>
+    <string name="cf_optimizer_password">Mật khẩu tải lên</string>
+    <string name="cf_optimizer_password_set">Đã đặt</string>
+    <string name="cf_optimizer_password_unset">Chưa đặt</string>
+    <string name="cf_optimizer_subscription_profile">Đăng ký liên kết</string>
+    <string name="cf_optimizer_subscription_profile_none">Không có</string>
+    <string name="cf_optimizer_custom_entries">Mục tĩnh tùy chỉnh</string>
+    <string name="cf_optimizer_scan_on_network_change">Quét khi đổi mạng</string>
+    <string name="cf_optimizer_scan_on_network_change_summary">Tự động quét lại IP ứng viên khi mạng thay đổi. Mặc định tắt.</string>
+    <string name="cf_optimizer_run_now">Chạy tối ưu ngay</string>
+    <string name="cf_optimizer_run_now_summary">Đo IP ứng viên và cập nhật danh sách chia sẻ của Worker</string>
+    <string name="cf_optimizer_shared_list_title">Xác nhận danh sách chia sẻ</string>
+    <string name="cf_optimizer_shared_list_message">Danh sách ADD.txt của Worker được chia sẻ giữa mọi thiết bị và đăng ký dùng Worker này. Chạy tối ưu sẽ ghi đè bằng kết quả của thiết bị này.</string>
 </resources>

@@ -46,6 +46,20 @@
                 android:value="explanation_for_special_use"/>
         </service>
 
+        <service
+            android:name=".cfoptimizer.CfOptimizerService"
+            android:exported="false"
+            android:process=":background"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="explanation_for_special_use"/>
+        </service>
+
+        <receiver
+            android:name=".cfoptimizer.CfOptimizerReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <provider
             android:name=".FilesProvider"
             android:authorities="${applicationId}.files"

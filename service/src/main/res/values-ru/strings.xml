@@ -18,4 +18,9 @@
     <string name="provider_files">Файлы провайдера</string>
     <string name="profile_updater">Обновление профиля</string>
     <string name="profile_updating">Профиль обновляется</string>
+    <!-- CF optimizer (integration module) -->
+    <string name="cf_optimizer_service">CF Оптимизатор</string>
+    <string name="cf_optimizer_result_success">Оптимизировано узлов: %1$d, успешно загружено</string>
+    <string name="cf_optimizer_result_failure">Ошибка CF-оптимизатора: %1$s</string>
+    <string name="cf_optimizer_result_profile_failed">Список загружен, обновление профиля не удалось: %1$s</string>
 </resources>

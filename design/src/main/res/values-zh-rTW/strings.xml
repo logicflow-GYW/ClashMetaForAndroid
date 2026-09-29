@@ -261,4 +261,22 @@
     <string name="override_destination">Override Destination</string>
     <string name="import_from_qr_no_permission">相機權限受限，請前往設定開啟。</string>
     <string name="import_from_qr_exception">發生系統未知異常，操作失敗。</string>
+    <string name="cf_optimizer">CF 優選</string>
+    <string name="cf_optimizer_enable">啟用 CF 優選</string>
+    <string name="cf_optimizer_enable_summary">優選 Cloudflare 候選 IP 並自動維護訂閱</string>
+    <string name="cf_optimizer_worker_base_url">Worker 位址</string>
+    <string name="cf_optimizer_not_set">未設定</string>
+    <string name="cf_optimizer_url_invalid">僅支援 HTTPS 位址</string>
+    <string name="cf_optimizer_password">上傳密碼</string>
+    <string name="cf_optimizer_password_set">已設定</string>
+    <string name="cf_optimizer_password_unset">未設定</string>
+    <string name="cf_optimizer_subscription_profile">綁定的訂閱</string>
+    <string name="cf_optimizer_subscription_profile_none">未綁定</string>
+    <string name="cf_optimizer_custom_entries">自訂靜態行</string>
+    <string name="cf_optimizer_scan_on_network_change">網路切換時自動掃描</string>
+    <string name="cf_optimizer_scan_on_network_change_summary">網路變化時自動重新優選候選 IP，預設關閉。</string>
+    <string name="cf_optimizer_run_now">立即執行優選</string>
+    <string name="cf_optimizer_run_now_summary">測速候選 IP 並更新 Worker 共享列表</string>
+    <string name="cf_optimizer_shared_list_title">共享列表確認</string>
+    <string name="cf_optimizer_shared_list_message">Worker 的 ADD.txt 列表由使用同一 Worker 的所有裝置和訂閱共享。執行優選會用本機結果覆寫該列表。</string>
 </resources>

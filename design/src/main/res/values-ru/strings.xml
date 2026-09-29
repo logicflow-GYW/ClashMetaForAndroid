@@ -328,4 +328,22 @@
     <string name="override_destination">Override Destination</string>
     <string name="import_from_qr_no_permission">Доступ к камере ограничен. Разрешите его в настройках.</string>
     <string name="import_from_qr_exception">Произошла не обрабатываемая системная ошибка.</string>
+    <string name="cf_optimizer">Оптимизация CF</string>
+    <string name="cf_optimizer_enable">Включить оптимизацию CF</string>
+    <string name="cf_optimizer_enable_summary">Оптимизирует IP-адреса Cloudflare и поддерживает подписку в актуальном состоянии</string>
+    <string name="cf_optimizer_worker_base_url">Адрес Worker</string>
+    <string name="cf_optimizer_not_set">Не задано</string>
+    <string name="cf_optimizer_url_invalid">Разрешены только HTTPS-адреса</string>
+    <string name="cf_optimizer_password">Пароль для загрузки</string>
+    <string name="cf_optimizer_password_set">Задан</string>
+    <string name="cf_optimizer_password_unset">Не задан</string>
+    <string name="cf_optimizer_subscription_profile">Привязанная подписка</string>
+    <string name="cf_optimizer_subscription_profile_none">Нет</string>
+    <string name="cf_optimizer_custom_entries">Пользовательские статические строки</string>
+    <string name="cf_optimizer_scan_on_network_change">Сканировать при смене сети</string>
+    <string name="cf_optimizer_scan_on_network_change_summary">Автоматически повторно сканирует IP-кандидаты при смене сети. По умолчанию отключено.</string>
+    <string name="cf_optimizer_run_now">Запустить оптимизацию</string>
+    <string name="cf_optimizer_run_now_summary">Проверить IP-кандидаты и обновить общий список Worker</string>
+    <string name="cf_optimizer_shared_list_title">Подтверждение общего списка</string>
+    <string name="cf_optimizer_shared_list_message">Список ADD.txt у Worker общий для всех устройств и подписок, использующих этот Worker. Запуск оптимизации перезапишет его результатами этого устройства.</string>
 </resources>
