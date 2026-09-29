@@ -293,4 +293,11 @@
     <string name="cf_optimizer_max_candidates">候選上限</string>
     <string name="cf_optimizer_min_upload_entries">上傳門檻</string>
     <string name="cf_optimizer_max_per_region">每地區上限</string>
+    <string name="cf_optimizer_memory">記憶庫</string>
+    <string name="cf_optimizer_memory_summary">記住每個 IP 的歷史表現：穩定節點下輪優先複測，連續失敗的冷卻期內跳過</string>
+    <string name="cf_optimizer_data">匯出執行資料</string>
+    <string name="cf_optimizer_data_summary">記憶庫與歷史記錄</string>
+    <string name="cf_optimizer_data_summary_value">記憶庫 %1$d 個節點 · 已記錄 %2$d 輪</string>
+    <string name="cf_optimizer_export_done">已匯出 %1$d 個檔案到\n%2$s</string>
+    <string name="cf_optimizer_export_empty">暫無可匯出的資料 —— 先跑一輪優選</string>
 </resources>

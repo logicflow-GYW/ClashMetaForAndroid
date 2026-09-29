@@ -360,4 +360,11 @@
     <string name="cf_optimizer_max_candidates">Лимит кандидатов</string>
     <string name="cf_optimizer_min_upload_entries">Порог загрузки</string>
     <string name="cf_optimizer_max_per_region">Максимум на регион</string>
+    <string name="cf_optimizer_memory">Память</string>
+    <string name="cf_optimizer_memory_summary">Запоминать историю каждого IP: стабильные узлы проверяются первыми, сбойные пропускаются на время охлаждения</string>
+    <string name="cf_optimizer_data">Экспорт данных запусков</string>
+    <string name="cf_optimizer_data_summary">Память и история запусков</string>
+    <string name="cf_optimizer_data_summary_value">Память: %1$d узлов · %2$d запусков</string>
+    <string name="cf_optimizer_export_done">Экспортировано файлов: %1$d в\n%2$s</string>
+    <string name="cf_optimizer_export_empty">Пока нечего экспортировать —— сначала запустите оптимизацию</string>
 </resources>

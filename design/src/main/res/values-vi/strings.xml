@@ -283,4 +283,11 @@
     <string name="cf_optimizer_max_candidates">Giới hạn ứng viên</string>
     <string name="cf_optimizer_min_upload_entries">Ngưỡng tải lên</string>
     <string name="cf_optimizer_max_per_region">Tối đa mỗi khu vực</string>
+    <string name="cf_optimizer_memory">Bộ nhớ</string>
+    <string name="cf_optimizer_memory_summary">Ghi nhớ lịch sử từng IP: nút ổn định được đo lại trước, nút lỗi liên tục bị bỏ qua trong thời gian chờ</string>
+    <string name="cf_optimizer_data">Xuất dữ liệu chạy</string>
+    <string name="cf_optimizer_data_summary">Bộ nhớ và lịch sử chạy</string>
+    <string name="cf_optimizer_data_summary_value">Bộ nhớ: %1$d nút · %2$d lần chạy</string>
+    <string name="cf_optimizer_export_done">Đã xuất %1$d tệp tới\n%2$s</string>
+    <string name="cf_optimizer_export_empty">Chưa có dữ liệu để xuất —— hãy chạy tối ưu một lần trước</string>
 </resources>

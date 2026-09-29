@@ -13,6 +13,8 @@ import com.github.kr328.clash.design.util.root
 import com.github.kr328.clash.service.R as ServiceR
 import com.github.kr328.clash.service.cfoptimizer.CfOptimizerCoordinator
 import com.github.kr328.clash.service.cfoptimizer.StateStore
+import com.github.kr328.clash.service.cfoptimizer.history.CfOptimizerRunLog
+import com.github.kr328.clash.service.cfoptimizer.memory.CfMemoryStore
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSecretStore
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsStore
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerUrl
@@ -171,6 +173,19 @@ class CfOptimizerSettingsDesign(
                 summary = R.string.cf_optimizer_download_test_summary,
             )
 
+            switch(
+                value = cfSettings::memoryEnabled,
+                title = R.string.cf_optimizer_memory,
+                summary = R.string.cf_optimizer_memory_summary,
+            )
+
+            // 运行数据：摘要显示"攒了多少"，点一下导出 —— 导出到应用专属外部目录
+            // （Android/data/<包名>/files/cfoptimizer/），零权限，Termux / adb 可直接取。
+            val dataPref = clickable(
+                title = R.string.cf_optimizer_data,
+                summary = R.string.cf_optimizer_data_summary,
+            )
+
             // CF optimizer initial summaries — never echo the password value.
             launch(Dispatchers.Main) {
                 val baseUrl = withContext(Dispatchers.IO) { cfSettings.workerBaseUrl }
@@ -276,11 +291,44 @@ class CfOptimizerSettingsDesign(
                 }
             }
 
+            // 导出运行数据：记忆库 + 最近一轮候选明细 + 每轮摘要，复制到应用专属外部目录。
+            dataPref.clicked {
+                launch(Dispatchers.Main) {
+                    val copied = withContext(Dispatchers.IO) {
+                        CfOptimizerRunLog(context).exportToExternalStorage()
+                    }
+
+                    if (copied.isEmpty()) {
+                        showToast(R.string.cf_optimizer_export_empty, ToastDuration.Long)
+                    } else {
+                        showToast(
+                            context.getString(
+                                R.string.cf_optimizer_export_done,
+                                copied.size,
+                                copied.first().parentFile?.absolutePath.orEmpty(),
+                            ),
+                            ToastDuration.Long,
+                        )
+                    }
+
+                    dataPref.summary = withContext(Dispatchers.IO) { dataSummary() }
+                }
+            }
+
             // 运行状态直接写在「立即运行优选」的副标题上 —— 不再单独占一张卡片：
             // 通知栏已经实时显示阶段与进度，页面顶部再放一块既是重复信息，也吃掉一大块留白。
             launch(Dispatchers.Main) {
+                var tick = 0
+
                 while (isActive) {
                     runNowPref.summary = withContext(Dispatchers.IO) { statusText() }
+
+                    // 记忆库/历史规模变化慢，隔几拍刷一次就够（解析 memory.json 不便宜）。
+                    if (tick % DATA_REFRESH_EVERY_TICKS == 0) {
+                        dataPref.summary = withContext(Dispatchers.IO) { dataSummary() }
+                    }
+
+                    tick++
 
                     delay(STATUS_POLL_MILLIS)
                 }
@@ -288,6 +336,14 @@ class CfOptimizerSettingsDesign(
         }
 
         binding.content.addView(screen.root)
+    }
+
+    /** 运行数据摘要：记忆库节点数 + 历史轮数（决定"值不值得导出"的两个数字）。 */
+    private fun dataSummary(): String {
+        val nodes = CfMemoryStore(context).size()
+        val runs = CfOptimizerRunLog(context).runCount()
+
+        return context.getString(R.string.cf_optimizer_data_summary_value, nodes, runs)
     }
 
     /**
@@ -335,6 +391,9 @@ class CfOptimizerSettingsDesign(
     private companion object {
         /** 状态行刷新间隔（毫秒）：只改一行文字，比原来 2s 轮询一整张卡片便宜。 */
         const val STATUS_POLL_MILLIS: Long = 2_000
+
+        /** 记忆库/历史摘要的刷新间隔（每 N 拍 ≈ N × 2 秒）：解析 memory.json 不便宜。 */
+        const val DATA_REFRESH_EVERY_TICKS: Int = 5
 
         /**
          * 运行状态过期阈值：前台服务被系统杀掉时 stage 会停在中间态，
