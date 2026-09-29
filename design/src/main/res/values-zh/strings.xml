@@ -280,4 +280,22 @@
     <string name="shortcut_start_long">启动 Clash 服务</string>
     <string name="shortcut_stop_short">停止 Clash</string>
     <string name="shortcut_stop_long">停止 Clash 服务</string>
+    <string name="cf_optimizer">CF 优选</string>
+    <string name="cf_optimizer_enable">启用 CF 优选</string>
+    <string name="cf_optimizer_enable_summary">优选 Cloudflare 候选 IP 并自动维护订阅</string>
+    <string name="cf_optimizer_worker_base_url">Worker 地址</string>
+    <string name="cf_optimizer_not_set">未设置</string>
+    <string name="cf_optimizer_url_invalid">仅支持 HTTPS 地址</string>
+    <string name="cf_optimizer_password">上传密码</string>
+    <string name="cf_optimizer_password_set">已设置</string>
+    <string name="cf_optimizer_password_unset">未设置</string>
+    <string name="cf_optimizer_subscription_profile">绑定的订阅</string>
+    <string name="cf_optimizer_subscription_profile_none">未绑定</string>
+    <string name="cf_optimizer_custom_entries">自定义静态行</string>
+    <string name="cf_optimizer_scan_on_network_change">网络切换时自动扫描</string>
+    <string name="cf_optimizer_scan_on_network_change_summary">网络变化时自动重新优选候选 IP，默认关闭。</string>
+    <string name="cf_optimizer_run_now">立即运行优选</string>
+    <string name="cf_optimizer_run_now_summary">测速候选 IP 并更新 Worker 共享列表</string>
+    <string name="cf_optimizer_shared_list_title">共享列表确认</string>
+    <string name="cf_optimizer_shared_list_message">Worker 的 ADD.txt 列表由使用同一 Worker 的所有设备和订阅共享。运行优选会用本机结果覆盖该列表。</string>
 </resources>

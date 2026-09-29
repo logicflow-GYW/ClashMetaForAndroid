@@ -27,6 +27,7 @@ suspend fun Context.requestModelTextInput(
     hint: CharSequence? = null,
     error: CharSequence? = null,
     validator: Validator = ValidatorAcceptAll,
+    passwordInput: Boolean = false,
 ): String? {
     return suspendCancellableCoroutine {
         val binding = DialogTextFieldBinding
@@ -65,6 +66,15 @@ suspend fun Context.requestModelTextInput(
         dialog.setOnShowListener {
             if (hint != null)
                 binding.textLayout.hint = hint
+
+            if (passwordInput) {
+                // Masked input for secrets; toggleable visibility for usability.
+                binding.textField.inputType =
+                    android.text.InputType.TYPE_CLASS_TEXT or
+                            android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                binding.textLayout.endIconMode =
+                    com.google.android.material.textfield.TextInputLayout.END_ICON_PASSWORD_TOGGLE
+            }
 
             binding.textField.apply {
                 binding.textLayout.isErrorEnabled = error != null

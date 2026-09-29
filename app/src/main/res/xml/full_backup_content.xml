@@ -3,6 +3,11 @@
     <include
         domain="sharedpref"
         path="." />
+    <!-- CF optimizer Worker password ciphertext: device-bound Keystore key cannot
+         decrypt a restored blob, so the secret never leaves the device. -->
+    <exclude
+        domain="sharedpref"
+        path="cfoptimizer_secret.xml" />
     <include
         domain="database"
         path="." />
