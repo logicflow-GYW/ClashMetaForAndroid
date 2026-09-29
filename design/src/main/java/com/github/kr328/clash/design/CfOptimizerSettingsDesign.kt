@@ -183,8 +183,8 @@ class CfOptimizerSettingsDesign(
                 summary = R.string.cf_optimizer_memory_summary,
             )
 
-            // 运行数据：摘要显示"攒了多少"，点一下导出 —— 导出到应用专属外部目录
-            // （Android/data/<包名>/files/cfoptimizer/），零权限，Termux / adb 可直接取。
+            // 运行数据：摘要显示"攒了多少"，点一下导出 —— 导出到下载目录下的导出子文件夹
+            // （Download/CF优选/），零权限，文件管理器 / Termux / adb 都能直接拿到。
             val dataPref = clickable(
                 title = R.string.cf_optimizer_data,
                 summary = R.string.cf_optimizer_data_summary,
@@ -302,7 +302,7 @@ class CfOptimizerSettingsDesign(
                 }
             }
 
-            // 导出运行数据：记忆库 + 最近一轮候选明细 + 每轮摘要，复制到应用专属外部目录。
+            // 导出运行数据：记忆库 + 最近一轮候选明细 + 每轮摘要，复制到下载目录下的导出子文件夹。
             dataPref.clicked {
                 launch(Dispatchers.Main) {
                     val copied = withContext(Dispatchers.IO) {
@@ -328,7 +328,7 @@ class CfOptimizerSettingsDesign(
 
             // 分享运行数据：把刚导出的那几个文件一次性交给系统分享面板。
             // 走 FileProvider 的 content:// URI（file:// 在 API 24+ 会直接抛 FileUriExposedException），
-            // authority 与 app/manifest 里注册的一致，只暴露 files/cfoptimizer/ 一个子目录。
+            // authority 与 app/manifest 里注册的一致，只暴露 Download/CF优选/ 与 files/cfoptimizer/ 两个子目录。
             sharePref.clicked {
                 launch(Dispatchers.Main) {
                     val exported = withContext(Dispatchers.IO) {

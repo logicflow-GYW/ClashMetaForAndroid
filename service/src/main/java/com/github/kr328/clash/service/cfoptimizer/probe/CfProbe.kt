@@ -362,26 +362,29 @@ class CfProbe(private val context: Context) {
         const val SAMPLE_GAP_MS: Long = 100
 
         /**
-         * TCP 预筛并发。原版 `MAX_TCP_WORKERS=500`；这里取 200，理由：
-         * ①纯 connect 不占 TLS 栈、失败快，单价远低于 TTFB；
-         * ②每个并发都是一个真实 fd（200 ≈ 200 fd，仍在常规进程上限内）；
-         * ③再高会撞移动网络的连接表与 radio 排队，收益递减。
-         * 2000 个候选在 1s 超时下 ≈ 10 秒筛完（原版 3000 / 500 ≈ 6 秒，同一量级）。
+         * TCP 预筛并发。原版 `MAX_TCP_WORKERS=500`（真机日志实测自适应到 485→500）。
+         *
+         * 取 400 = 原版稳态的 80%：原版有 PID 自整定 + 10% 均值回归兜底，我们的默认值是静态的，
+         * 留 20% 余量补这个差。原版在**同一台手机**上以 500 并发 7 秒筛完 6397 个候选，
+         * 所以 400 不是猜的：纯 connect 不占 TLS 栈、失败快，单价远低于 TTFB。
          */
-        const val TCP_PROBE_CONCURRENCY: Int = 200
+        const val TCP_PROBE_CONCURRENCY: Int = 400
 
         /**
-         * TCP 预筛超时（毫秒）。原版 `TCP_TIMEOUT=1s`：黑洞地址靠它兜底，不给第二次机会
-         * —— 漏斗的意义就是把"确认它是死的"这件事做便宜。
+         * TCP 预筛超时（毫秒）。原版 `TCP_TIMEOUT=1s`，真机日志里自整定到 0.86–0.88s。
+         * 黑洞地址靠它兜底，不给第二次机会 —— 漏斗的意义就是把"确认它是死的"这件事做便宜。
+         * 900ms 对 300–400ms RTT 的真实节点仍有余量。
          */
-        const val TCP_PROBE_TIMEOUT_MS: Int = 1_000
+        const val TCP_PROBE_TIMEOUT_MS: Int = 900
 
         /**
-         * 探测并发硬上限。原脚本 50 workers，Android 端取 12：
-         * 100 候选 ×（3 TTFB + 1 trace）在并发 12 下约 1~2 分钟跑完（并发 8 时接近 3 分钟），
-         * 再高会让移动网络排队、反而拉长尾延迟。数值显式命名并附理由，不砍成魔数。
+         * 探测并发硬上限（原版 TTFB workers 真机日志实测 54→57）。
+         *
+         * 取 40 = 原版稳态的约 70%：这里是完整 TLS 握手 + HTTP 请求，比 TCP connect 重，
+         * 且每个候选要排 3 次采样。原版同机 1008 个候选 × 3 次采样 76 秒跑完；
+         * 我们 600 个候选在 40 并发下约 45–60 秒，同一量级。
          */
-        const val PROBE_CONCURRENCY: Int = 12
+        const val PROBE_CONCURRENCY: Int = 40
 
         /** 连接超时（毫秒）。公网 anycast 入口，5s 足够；超时候选本轮无指标。 */
         const val CONNECT_TIMEOUT_MS: Int = 5_000
@@ -397,10 +400,11 @@ class CfProbe(private val context: Context) {
         const val DOWNLOAD_PATH: String = "/__down?bytes=3145728"
 
         /**
-         * 参与下载测速的候选上限：只测 TTFB 最优的这么多（原脚本 TTFB_POOL_LIMIT 语义）。
-         * 20 × 3MB = 最坏 60MB 流量，通常早停远低于此；移动数据敏感用户可关掉下载测速。
+         * 参与下载测速的候选上限：只测 TTFB 最优的这么多（原脚本 TTFB_POOL_LIMIT 语义，原版实测 80→76）。
+         * 取 40：40 × 3MB = 最坏 120MB，但早停线（100 Mbps、最少 1s）会让快节点远低于此，
+         * 典型一轮 30–60MB。移动数据敏感用户可关掉下载测速（排序退化成纯延迟）。
          */
-        const val DOWNLOAD_POOL_LIMIT: Int = 20
+        const val DOWNLOAD_POOL_LIMIT: Int = 40
 
         /** 下载测速并发：比探测低（每个连接都在持续吃带宽，并发高会互相抢）。 */
         const val DOWNLOAD_CONCURRENCY: Int = 4
@@ -411,8 +415,14 @@ class CfProbe(private val context: Context) {
         /** 单候选最长测量时间（毫秒）。到点按已读字节数结算。 */
         const val DOWNLOAD_MAX_MILLIS: Long = 4_000
 
-        /** 提前收工门槛：至少测 [DOWNLOAD_EARLY_STOP_MIN_MILLIS] 后速率已达标即停。 */
-        const val DOWNLOAD_EARLY_STOP_MBPS: Double = 120.0
+        /**
+         * 提前收工门槛：至少测 [DOWNLOAD_EARLY_STOP_MIN_MILLIS] 后速率已达标即停。
+         *
+         * 100 Mbps = 评分参考带宽（150）的三分之二：过了这条线，带宽分量已拿到大部分分数，
+         * 再测只烧流量。**不要照抄原版的 30 Mbps** —— 它日志里 33.2/33.0/32.9 密集堆在早停线附近，
+         * 那些读数是下界而非真实带宽，用来排序分不出节点好坏。
+         */
+        const val DOWNLOAD_EARLY_STOP_MBPS: Double = 100.0
         const val DOWNLOAD_EARLY_STOP_MIN_MILLIS: Long = 1_000
 
         /** 读缓冲与响应头上限。 */

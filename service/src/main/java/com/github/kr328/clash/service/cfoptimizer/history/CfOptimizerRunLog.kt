@@ -1,6 +1,12 @@
 package com.github.kr328.clash.service.cfoptimizer.history
 
+import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import androidx.annotation.RequiresApi
 import com.github.kr328.clash.service.cfoptimizer.CandidateIp
 import com.github.kr328.clash.service.cfoptimizer.OptimizedEntry
 import com.github.kr328.clash.service.cfoptimizer.ProbeMetrics
@@ -73,8 +79,10 @@ class CfRunRecorder {
  *   （`{generated_at, net_name, count, nodes:[{ip,port,cc,ttfb_ms,mbps,score}]}`）。
  * - `memory.json` —— 跨轮记忆库（由 [CfMemoryStore] 维护，导出时一并复制）。
  *
- * **导出 = 复制**：四个文件原样拷到应用专属外部目录 `Android/data/<包名>/files/cfoptimizer/`，
- * 不需要任何存储权限、卸载即清理，Termux / Shizuku / `adb pull` 都能直接取走。
+ * **导出 = 复制**：四个文件原样拷到**下载目录**下的导出子文件夹（`Download/CF优选/`，
+ * 见 [exportToExternalStorage] 与 [EXPORT_DIR_NAME]），不需要任何存储权限，
+ * 系统文件管理器 / Termux / Shizuku / `adb pull` 都能直接取走；
+ * 直写被拒时按 ③应用专属目录 兜底（老系统）。
  */
 class CfOptimizerRunLog(context: Context) {
     private val appContext = context.applicationContext
@@ -98,26 +106,122 @@ class CfOptimizerRunLog(context: Context) {
         }
     }
 
-    /** 把私有目录下的四个文件复制到应用专属外部目录，返回落点（供 UI 显示）。 */
+    /**
+     * 把私有目录下的几个文件复制到**下载**目录的 [EXPORT_DIR_NAME] 子文件夹，返回落点（供 UI 显示）。
+     *
+     * 为什么不再用应用专属外部目录（`Android/data/<包名>/files/`）：Android 11+ 起文件管理器与
+     * MTP 都进不去那个目录 —— 真机反馈「导出到一个手机上进不去的文件夹」。公共位置里零权限、
+     * 用户能直接打开的就是下载目录下的子文件夹。
+     *
+     * 三级回落，保证功能不因系统版本消失：
+     * ① 文件 API 直写（Android 11+ 允许写下载子目录，无需权限）；
+     * ② [MediaStore] 的 Downloads 集合（Android 10 的 scoped storage 下直写可能被拒，同样无需权限）；
+     * ③ 退回原来的应用专属目录（老系统/厂商限制兜底，功能不消失）。
+     *
+     * ponytail: 不申请 WRITE_EXTERNAL_STORAGE | 天花板: API<29 且直写被拒时仍落应用专属目录 |
+     * 升级触发: 用户反馈导出后仍找不到文件
+     */
     fun exportToExternalStorage(): List<File> {
-        val target = appContext.getExternalFilesDir(CfMemoryStore.DIR_NAME) ?: return emptyList()
-
-        target.mkdirs()
-
         val copied = mutableListOf<File>()
 
         exportableFiles().forEach { source ->
             if (!source.isFile) return@forEach
 
-            runCatching {
-                val destination = File(target, source.name)
+            val destination = runCatching { writeExportFile(source) }.getOrNull() ?: return@forEach
 
-                source.copyTo(destination, overwrite = true)
-                copied += destination
-            }
+            copied += destination
         }
 
         return copied
+    }
+
+    /** 落一个导出文件：①直写下载目录 → ②MediaStore → ③应用专属目录。 */
+    private fun writeExportFile(source: File): File? =
+        writeDirectToDownloads(source)
+            ?: writeWithMediaStore(source)
+            ?: writeToAppExternalDir(source)
+
+    /** 导出目录（`/storage/emulated/0/Download/[EXPORT_DIR_NAME]`）。 */
+    private fun downloadsDir(): File =
+        File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            EXPORT_DIR_NAME,
+        )
+
+    private fun writeDirectToDownloads(source: File): File? {
+        val dir = downloadsDir()
+
+        dir.mkdirs()
+
+        if (!dir.isDirectory) return null
+
+        val destination = File(dir, source.name)
+
+        source.copyTo(destination, overwrite = true)
+
+        return destination.takeIf { it.isFile }
+    }
+
+    private fun writeWithMediaStore(source: File): File? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching { writeWithMediaStoreQ(source) }.getOrNull()
+        } else {
+            null
+        }
+
+    /**
+     * Android 10 的直写兜底。同名文件先删再插，否则一轮轮导出会攒出 `x (1).json`、`x (2).json`。
+     */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun writeWithMediaStoreQ(source: File): File? {
+        val relativePath = Environment.DIRECTORY_DOWNLOADS + "/" + EXPORT_DIR_NAME + "/"
+        val resolver = appContext.contentResolver
+
+        resolver.query(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Downloads._ID),
+            "${MediaStore.Downloads.RELATIVE_PATH}=? AND ${MediaStore.Downloads.DISPLAY_NAME}=?",
+            arrayOf(relativePath, source.name),
+            null,
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val stale = ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cursor.getLong(0))
+
+                resolver.delete(stale, null, null)
+            }
+        }
+
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, source.name)
+            put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+
+        resolver.openOutputStream(uri)?.use { output ->
+            source.inputStream().use { input -> input.copyTo(output) }
+        } ?: return null
+
+        values.clear()
+        values.put(MediaStore.Downloads.IS_PENDING, 0)
+
+        resolver.update(uri, values, null, null)
+
+        return File(downloadsDir(), source.name).takeIf { it.isFile }
+    }
+
+    /** 老系统兜底：退回应用专属外部目录（Android 11+ 的机器上用户进不去，但功能不消失）。 */
+    private fun writeToAppExternalDir(source: File): File? {
+        val dir = appContext.getExternalFilesDir(CfMemoryStore.DIR_NAME) ?: return null
+
+        dir.mkdirs()
+
+        val destination = File(dir, source.name)
+
+        source.copyTo(destination, overwrite = true)
+
+        return destination.takeIf { it.isFile }
     }
 
     /**
@@ -138,7 +242,7 @@ class CfOptimizerRunLog(context: Context) {
     }
 
     /** 外部导出目录（UI 提示用；可能尚未创建）。 */
-    fun externalDirectory(): File? = appContext.getExternalFilesDir(CfMemoryStore.DIR_NAME)
+    fun externalDirectory(): File? = downloadsDir()
 
     fun privateDirectory(): File = directory
 
@@ -265,6 +369,9 @@ class CfOptimizerRunLog(context: Context) {
     )
 
     companion object {
+        /** 导出落点：下载目录下的这个子文件夹（用户能看见、能用文件管理器打开）。 */
+        const val EXPORT_DIR_NAME = "CF优选"
+
         const val RUNS_FILE = "runs.jsonl"
         const val CANDIDATES_FILE = "candidates.csv"
 

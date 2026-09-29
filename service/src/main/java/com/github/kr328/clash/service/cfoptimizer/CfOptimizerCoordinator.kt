@@ -6,6 +6,7 @@ import com.github.kr328.clash.service.cfoptimizer.history.CfOptimizerRunLog
 import com.github.kr328.clash.service.cfoptimizer.history.CfRunRecorder
 import com.github.kr328.clash.service.cfoptimizer.memory.CfMemoryScoring
 import com.github.kr328.clash.service.cfoptimizer.memory.CfMemoryStore
+import com.github.kr328.clash.service.cfoptimizer.net.IspTagResolver
 import com.github.kr328.clash.service.cfoptimizer.net.PhysicalNetwork
 import com.github.kr328.clash.service.cfoptimizer.probe.CfProbe
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsStore
@@ -129,7 +130,7 @@ class CfOptimizerCoordinator(private val context: Context) {
 
         // 网络标签提前取（记忆库、运行历史、Worker 行三处共用同一个值，
         // 避免同一轮里出现两个不一致的标签）。
-        val networkTag = PhysicalNetwork.transportTag(context, physicalNetwork)
+        val networkTag = IspTagResolver.resolve(context, physicalNetwork, baseUrl)
 
         // 1. 源发现（导航站 → 缓存 → 内置兜底）+ 拉取候选。
         val state = StateStore(context)
@@ -455,8 +456,13 @@ class CfOptimizerCoordinator(private val context: Context) {
         /** 探测网络不可用时的兜底标签。 */
         const val DEFAULT_TAG: String = "DefaultNet"
 
-        /** 每轮从记忆库取多少条优先复测（原版 priority_ips 的 App 等价物）。 */
-        const val MEMORY_POOL_LIMIT: Int = 20
+        /**
+         * 每轮从记忆库取多少条优先复测（原版 priority_ips 的 App 等价物）。
+         *
+         * 原版真机日志实测「已加载 100 个记忆库优先节点」。取 100：占昂贵层（默认 600）的六分之一，
+         * 与原版比例相当 —— 稳定节点值得优先复测，但不该把探索新节点的额度挤没。
+         */
+        const val MEMORY_POOL_LIMIT: Int = 100
 
         /**
          * 下载测速关闭时的门槛分。契约基线 30 分按「评分上限 60」等比折半——
