@@ -341,8 +341,8 @@
     <string name="cf_optimizer_subscription_profile">Привязанная подписка</string>
     <string name="cf_optimizer_subscription_profile_none">Нет</string>
     <string name="cf_optimizer_custom_entries">Пользовательские статические строки</string>
-    <string name="cf_optimizer_scan_on_network_change">Сканировать при смене сети</string>
-    <string name="cf_optimizer_scan_on_network_change_summary">Автоматически повторно сканирует IP-кандидаты при смене сети. По умолчанию отключено.</string>
+    <string name="cf_optimizer_auto_heal">Автовосстановление при деградации</string>
+    <string name="cf_optimizer_auto_heal_summary">Запускает полную оптимизацию, когда большинство узлов не работают или медленные — не чаще одного раза в 6 часов. По умолчанию выключено. Работает в любой сети (Wi-Fi или мобильный интернет).</string>
     <string name="cf_optimizer_run_now">Запустить оптимизацию</string>
     <string name="cf_optimizer_run_now_summary">Проверить IP-кандидаты и обновить общий список Worker</string>
     <string name="cf_optimizer_shared_list_title">Подтверждение общего списка</string>

@@ -19,7 +19,7 @@ data class CfOptimizerSettings(
     val subscriptionProfileId: UUID?,
     val confirmedSharedListOwnership: Boolean,
     val customEntries: List<String>,
-    val scanOnNetworkChange: Boolean,
+    val autoHealEnabled: Boolean,
     val lastRunAt: Long,
 )
 
@@ -61,8 +61,8 @@ class CfOptimizerSettingsStore(context: Context) {
         defaultValue = false,
     )
 
-    var scanOnNetworkChange: Boolean by store.boolean(
-        key = "cfoptimizer_scan_on_network_change",
+    var autoHealEnabled: Boolean by store.boolean(
+        key = "cfoptimizer_auto_heal_enabled",
         defaultValue = false,
     )
 
@@ -193,7 +193,7 @@ class CfOptimizerSettingsStore(context: Context) {
             subscriptionProfileId = subscriptionProfileId,
             confirmedSharedListOwnership = confirmedSharedListOwnership,
             customEntries = customEntries ?: emptyList(),
-            scanOnNetworkChange = scanOnNetworkChange,
+            autoHealEnabled = autoHealEnabled,
             lastRunAt = lastRunAt,
         )
 }
