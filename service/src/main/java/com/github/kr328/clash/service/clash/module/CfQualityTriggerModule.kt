@@ -5,9 +5,11 @@ import android.content.Intent
 import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.core.Clash
 import com.github.kr328.clash.core.model.ProxySort
-import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerIntents
 import com.github.kr328.clash.service.cfoptimizer.quality.CfQualityGate
+import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerIntents
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsStore
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -20,8 +22,9 @@ import kotlinx.coroutines.isActive
  */
 class CfQualityTriggerModule(service: Service) : Module<Unit>(service) {
     override suspend fun run() {
-        while (isActive) {
-            delay(CHECK_INTERVAL_MINUTES)
+        // 本类不是 CoroutineScope（Module 基类只有 service），显式取本协程的上下文判定。
+        while (coroutineContext.isActive) {
+            delay(CHECK_INTERVAL_MS)
             checkAndTrigger()
         }
     }
@@ -79,5 +82,8 @@ class CfQualityTriggerModule(service: Service) : Module<Unit>(service) {
     companion object {
         /** 检查周期（分钟）：读核心内存数据，很便宜；节流在判定里另有 6 小时门。 */
         const val CHECK_INTERVAL_MINUTES: Long = 30
+
+        /** delay() 只认毫秒 —— 换算只在这里做一次，杜绝「分钟常量直接喂毫秒 API」。 */
+        private val CHECK_INTERVAL_MS: Long = TimeUnit.MINUTES.toMillis(CHECK_INTERVAL_MINUTES)
     }
 }
