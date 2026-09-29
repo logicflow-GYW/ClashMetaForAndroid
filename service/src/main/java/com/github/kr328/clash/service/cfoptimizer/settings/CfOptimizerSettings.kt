@@ -298,6 +298,17 @@ class CfOptimizerSettingsStore(context: Context) {
 
     val dedupPrefixV4: Int get() = CfOptimizerTuning.dedupPrefixV4(dedupPrefixV4Raw)
 
+    /**
+     * 劣化自动补货的最小间隔（小时，原版无此项）：距上次优选不足这个时长不触发。
+     * **0 = 不节流** —— 失败循环（劣化又修不好）失去兜底，质量门每 30 分钟空跑一轮。
+     */
+    var minIntervalHoursRaw: String by store.string(
+        key = "cfoptimizer_min_interval_hours",
+        defaultValue = CfOptimizerTuning.MIN_INTERVAL_HOURS_DEFAULT.toString(),
+    )
+
+    val minIntervalHours: Int get() = CfOptimizerTuning.minIntervalHours(minIntervalHoursRaw)
+
     // ── 记忆库（原版 cf_memory.py）──
 
     /** 超期清除（天，原版 STALE_DAYS）。 */

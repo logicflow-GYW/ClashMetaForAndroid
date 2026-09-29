@@ -385,6 +385,7 @@
     <string name="cf_optimizer_subscription_profile_none">None</string>
     <string name="cf_optimizer_custom_entries">Custom static entries</string>
     <string name="cf_optimizer_auto_heal">Auto-heal on degradation</string>
+    <string name="cf_optimizer_min_interval_hours">Auto-heal min interval, hours (default 6, 0 = off)</string>
     <string name="cf_optimizer_auto_heal_summary">Runs a full optimization when most proxy nodes are failing or slow — at most once every 6 hours. Disabled by default. Works on any network (Wi-Fi or cellular).</string>
     <string name="cf_optimizer_run_now">Run optimizer now</string>
     <string name="cf_optimizer_run_now_summary">Probe candidates and update the Worker shared list</string>

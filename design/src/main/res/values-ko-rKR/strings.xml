@@ -278,6 +278,7 @@
     <string name="cf_optimizer_subscription_profile_none">없음</string>
     <string name="cf_optimizer_custom_entries">사용자 지정 정적 항목</string>
     <string name="cf_optimizer_auto_heal">저하 시 자동 재최적화</string>
+    <string name="cf_optimizer_min_interval_hours">자동 재최적화 최소 간격(시간, 기본 6, 0 = 제한 없음)</string>
     <string name="cf_optimizer_auto_heal_summary">대부분의 노드가 실패하거나 느려지면 자동으로 전체 최적화를 실행합니다 (6시간에 한 번까지). 기본값은 꺼짐입니다.네트워크 종류를 가리지 않습니다 (Wi-Fi 및 모바일 데이터 모두).</string>
     <string name="cf_optimizer_run_now">지금 최적화 실행</string>
     <string name="cf_optimizer_run_now_summary">후보 IP를 측정하고 Worker 공유 목록을 업데이트합니다</string>

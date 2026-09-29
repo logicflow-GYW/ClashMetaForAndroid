@@ -132,17 +132,11 @@ fun main() {
 
     // ---- 7. 字符串格式 ----
     val e4 = OptimizedEntry("1.2.3.4", 443, "SG", 0, 0, 150.0, 100.0)
-    check("ipv4 worker line", e4.toWorkerLine("warp") == "1.2.3.4:443#SG-warp")
+    check("ipv4 worker line", e4.toWorkerLine() == "1.2.3.4:443#SG")
     val e6 = OptimizedEntry("2606:4700::1", 443, "ZZ", 0, 0, 150.0, 100.0)
-    check("ipv6 worker line bracketed", e6.toWorkerLine("warp") == "[2606:4700::1]:443#ZZ-warp")
-    check("lowercase region normalized", e4.copy(region = "sg").toWorkerLine("warp") == "1.2.3.4:443#SG-warp")
-    check("bad region falls back to ZZ", e4.copy(region = "toolong").toWorkerLine("warp") == "1.2.3.4:443#ZZ-warp")
-    var threw = false
-    try { e4.toWorkerLine("") } catch (_: IllegalArgumentException) { threw = true }
-    check("empty tag throws", threw)
-    threw = false
-    try { e4.toWorkerLine("a b#c") } catch (_: IllegalArgumentException) { threw = true }
-    check("tag with injection chars throws", threw)
+    check("ipv6 worker line bracketed", e6.toWorkerLine() == "[2606:4700::1]:443#ZZ")
+    check("lowercase region normalized", e4.copy(region = "sg").toWorkerLine() == "1.2.3.4:443#SG")
+    check("bad region falls back to ZZ", e4.copy(region = "toolong").toWorkerLine() == "1.2.3.4:443#ZZ")
     check("region normalization in rank output",
         CfOptimizerEngine.rank(listOf(CandidateIp("1.2.3.4", 443)),
             mapOf(CandidateIp("1.2.3.4", 443) to ProbeMetrics(0, 0, 150.0, 1, "sg")))[0].region == "SG")
