@@ -31,6 +31,29 @@ object CfOptimizerEngine {
     const val REGION_FALLBACK: String = "ZZ"
 
     /**
+     * 便宜层（原始候选池）相对昂贵层（TTFB 探测上限）的倍数。
+     *
+     * 依据：bulk 源列表的存活率经验值约 5–15%（原版脚本在同一个池子里先用 500 并发做 TCP 筛，
+     * 再让存活集进 TTFB 段）。取 10 倍，目标是把**昂贵层填满**而不是把池子堆大：
+     * `maxCandidates=300` → 原始池 3000，与原版 `sample_limit=3000` 同量级；
+     * 存活率 10% 时正好 300 个进 TTFB 段。因子调大只会多花 TCP 一段的时间（1s/个 ÷ 200 并发）。
+     */
+    const val RAW_POOL_FACTOR: Int = 10
+
+    /**
+     * 便宜层的绝对上限。池子再大，TCP 预筛也是一次一次建连，不会更快，只多占内存与时间；
+     * 20000 相当于把昂贵层上限拉到 2000 时的原始池，超出部分按随机顺序丢弃。
+     */
+    const val RAW_POOL_CEILING: Int = 20_000
+
+    /**
+     * 由昂贵层上限推导便宜层上限（两层配额，见 [RAW_POOL_FACTOR]）。
+     * 传入值非法（≤0）时按 1 处理 —— 只放行、不放大用户填错的参数。
+     */
+    fun rawPoolLimit(maxCandidates: Int): Int =
+        (maxCandidates.coerceAtLeast(1) * RAW_POOL_FACTOR).coerceAtMost(RAW_POOL_CEILING)
+
+    /**
      * 对候选做校验、指标过滤、评分与排序，返回最多 [OptimizerLimits.maxEntries] 条结果。
      *
      * - 坏 IP（非字面量/private/loopback/link-local/multicast/reserved/unspecified）、

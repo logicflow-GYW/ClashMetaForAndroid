@@ -28,6 +28,15 @@ class CfRunRecorder {
     var memoryReused: Int = 0
     var memoryBlocked: Int = 0
 
+    /** 漏斗：便宜层条数（TCP 预筛之前的原始池）。 */
+    var candidatesRaw: Int = 0
+
+    /** 漏斗：TCP 存活条数（进入昂贵 TTFB 段的数量）。 */
+    var tcpAlive: Int = 0
+
+    /** 各阶段墙钟耗时（秒），键 = 协调器的 `STAGE_*` 常量。 */
+    var stageSeconds: Map<String, Double> = emptyMap()
+
     /** 异常退出的类名（正常返回时为空）。 */
     var failReason: String? = null
 
@@ -211,7 +220,10 @@ class CfOptimizerRunLog(context: Context) {
         val entry = JSONObject().apply {
             put("ts", stamp.format(Date(startedAtMs)))
             put("duration_s", ((System.currentTimeMillis() - startedAtMs) / 1000.0))
+            put("stage_s", JSONObject(recorder.stageSeconds))
             put("candidates", recorder.candidates.size)
+            put("candidates_raw", recorder.candidatesRaw)
+            put("tcp_alive", recorder.tcpAlive)
             put("probed", recorder.metrics.size)
             put("ranked", recorder.ranked.size)
             put("uploaded", outcome?.uploaded ?: false)

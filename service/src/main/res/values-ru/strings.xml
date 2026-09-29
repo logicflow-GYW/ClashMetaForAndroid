@@ -28,4 +28,5 @@
     <string name="cf_optimizer_stage_upload">Загрузка в Worker</string>
     <string name="cf_optimizer_result_failure">Ошибка CF-оптимизатора: %1$s</string>
     <string name="cf_optimizer_result_profile_failed">Список загружен, обновление профиля не удалось: %1$s</string>
+    <string name="cf_optimizer_stage_tcp">Проверка доступности %1$d/%2$d</string>
 </resources>

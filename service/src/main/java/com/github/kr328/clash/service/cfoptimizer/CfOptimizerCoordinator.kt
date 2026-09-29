@@ -96,6 +96,23 @@ class CfOptimizerCoordinator(private val context: Context) {
         val sourcesPerRun = settingsStore.sourcesPerRun
         val perSourceSample = settingsStore.perSourceSample
         val maxCandidates = settingsStore.maxCandidates
+
+        // 两层配额（漏斗结构，对齐原版"先便宜后贵"）：
+        //   便宜层 rawPool = maxCandidates × RAW_POOL_FACTOR —— 只付 TCP connect 的价钱（1s 超时、200 并发）；
+        //   昂贵层 maxCandidates —— 3 次 TTFB 采样 + trace + 下载测速，只作用在 TCP 存活集上。
+        // 原版 3000 候选之所以"轻松"，正是因为它先花几秒把死 IP 筛掉；删掉漏斗后每个死 IP 都要付
+        // 3 次完整 TLS+HTTP 超时（最坏 15 秒），80 个候选就能吃掉两分钟 —— 这才是"选不出来"的真正原因：
+        // 探索面被死 IP 的确认成本挤没了。
+        val rawPoolLimit = CfOptimizerEngine.rawPoolLimit(maxCandidates)
+
+        // 阶段墙钟耗时（秒），写进 runs.jsonl：没有它就没法回答"时间花在哪一段"。
+        val stageSeconds = LinkedHashMap<String, Double>()
+        var stageStartedAtMs = System.currentTimeMillis()
+
+        fun markStage(stage: String) {
+            stageSeconds[stage] = (System.currentTimeMillis() - stageStartedAtMs) / 1000.0
+            stageStartedAtMs = System.currentTimeMillis()
+        }
         val minUploadEntries = settingsStore.minUploadEntries
         val maxPerRegion = settingsStore.maxPerRegion
         val downloadTestEnabled = settingsStore.downloadTestEnabled
@@ -137,12 +154,14 @@ class CfOptimizerCoordinator(private val context: Context) {
                 sources,
                 excludedRegions = excludeCountries,
                 perSourceSample = perSourceSample,
-                maxCandidates = maxCandidates,
+                maxCandidates = rawPoolLimit,
                 network = physicalNetwork,
             )
         } catch (e: Exception) {
             return Result(0, 0, false, "candidates_${e.javaClass.simpleName}", false, null)
         }
+
+        markStage(STAGE_SOURCES)
 
         // 1.5 优先复测池 = 记忆库置信度 top-N（跨轮历史）+ 上轮写入 Worker 的节点。
         //     记忆库比 last-known-good 更准：它记得谁**稳定**，而不只是谁上一轮在名单里；
@@ -169,20 +188,41 @@ class CfOptimizerCoordinator(private val context: Context) {
 
         // 优先池在前、源候选在后，总池封顶 —— 记忆池越大，留给"探索新 IP"的名额越少，
         // 这就是探索/利用的权衡点：上一轮稳定节点越可信，本轮越省探测时间。
-        val allCandidates = (memoryCandidates + lastGoodCandidates + freshCandidates)
+        val pooled = (memoryCandidates + lastGoodCandidates + freshCandidates)
             .distinctBy { it.address to it.port }
-            .take(maxCandidates + MEMORY_POOL_LIMIT)
+            .take(rawPoolLimit + MEMORY_POOL_LIMIT)
 
-        if (allCandidates.isEmpty()) {
+        if (pooled.isEmpty()) {
             return Result(0, 0, false, "no_candidates", false, null)
         }
 
-        // 2. 物理网络探测（绑定 Network 的 socket，绕开本应用 VPN）。进度实时上报。
         val probe = CfProbe(context)
+
+        // 1.7 TCP 连通预筛（漏斗第一段）：死 IP 在这里以"1 次 connect × 1s"的代价淘汰，
+        //     只有存活集进昂贵的 TTFB/trace 段。保序 —— 记忆池在最前，截断时天然优先保留。
+        state.saveRunState(STAGE_TCP, 0, pooled.size)
+        onProgress(STAGE_TCP, 0, pooled.size)
+
+        val tcpAlive = probe.filterTcpReachable(pooled) { done, total ->
+            state.saveRunState(STAGE_TCP, done, total)
+            onProgress(STAGE_TCP, done, total)
+        }
+
+        markStage(STAGE_TCP)
+
+        val allCandidates = tcpAlive.take(maxCandidates + MEMORY_POOL_LIMIT)
+
+        if (allCandidates.isEmpty()) {
+            return Result(0, 0, false, "no_reachable_candidates", false, null)
+        }
+
+        // 2. 物理网络探测（绑定 Network 的 socket，绕开本应用 VPN）。进度实时上报。
         val metrics = probe.measure(allCandidates) { done, total ->
             state.saveRunState(STAGE_PROBE, done, total)
             onProgress(STAGE_PROBE, done, total)
         }
+
+        markStage(STAGE_PROBE)
 
         // 2.5 国家过滤（原版 EXCLUDE_COUNTRIES / ONLY_COUNTRIES，应用在 trace 阶段）：
         //     黑名单（trace loc 命中）不进评分/上传；白名单启用时只保留命中国家。
@@ -217,6 +257,8 @@ class CfOptimizerCoordinator(private val context: Context) {
             emptyMap()
         }
 
+        markStage(STAGE_DOWNLOAD)
+
         val scoredMetrics = if (downloads.isEmpty()) {
             metrics
         } else {
@@ -243,6 +285,8 @@ class CfOptimizerCoordinator(private val context: Context) {
         //     质量门不足 / 上传失败的轮次同样长记忆——失败轮恰恰是记忆库最该记住的。
         recordMemory(memory, allCandidates, scoredMetrics, ranked)
 
+        markStage(STAGE_RANK)
+
         recorder.capture(
             candidates = allCandidates,
             metrics = scoredMetrics,
@@ -252,6 +296,11 @@ class CfOptimizerCoordinator(private val context: Context) {
             memoryReused = memoryCandidates.size,
             memoryBlocked = blockedAddresses.size,
         )
+
+        // 漏斗计数与分阶段耗时（写进 runs.jsonl）：回答"时间花在哪一段、池子有多大"。
+        recorder.candidatesRaw = pooled.size
+        recorder.tcpAlive = tcpAlive.size
+        recorder.stageSeconds = stageSeconds.toMap()
 
         if (ranked.size < minUploadEntries) {
             return Result(allCandidates.size, ranked.size, false, "below_quality_gate", false, null)
@@ -393,6 +442,10 @@ class CfOptimizerCoordinator(private val context: Context) {
     companion object {
         /** 运行阶段标识（状态行 + 前台通知的确定性反馈来源）。 */
         const val STAGE_SOURCES: String = "sources"
+
+        /** 漏斗第一段：TCP 连通预筛（只 connect，死 IP 在这里被便宜地淘汰）。 */
+        const val STAGE_TCP: String = "tcp"
+
         const val STAGE_PROBE: String = "probe"
         const val STAGE_DOWNLOAD: String = "download"
         const val STAGE_RANK: String = "rank"

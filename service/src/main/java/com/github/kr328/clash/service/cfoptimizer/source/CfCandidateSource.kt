@@ -2,6 +2,7 @@ package com.github.kr328.clash.service.cfoptimizer.source
 
 import android.net.Network
 import com.github.kr328.clash.service.cfoptimizer.CandidateIp
+import com.github.kr328.clash.service.cfoptimizer.CfOptimizerEngine
 import com.github.kr328.clash.service.cfoptimizer.net.PhysicalNetwork
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -48,8 +49,14 @@ object CfCandidateSource {
     /** 每轮从导航站源池随机抽取的源数上限（手机端有界化；原版全量装载、按 sample_limit 抽样）。 */
     const val SOURCES_PER_RUN: Int = 4
 
-    /** 单源单轮抽样上限（原版 bulk 3000 / normal 1000 的手机端等比缩减）。 */
-    const val PER_SOURCE_SAMPLE: Int = 40
+    /** 单源单轮抽样上限（原版 bulk 3000 / normal 1000 的手机端等比缩减；默认 250 × 8 源 ≈ 2000 条原始池）。 */
+    const val PER_SOURCE_SAMPLE: Int = 250
+
+    /**
+     * 单源抽样条数的**绝对上限**（防用户把便宜层填到爆内存）。
+     * 3000 = 原版单源 `sample_limit` 的上限量级；再大只是多占内存，TCP 预筛并不会更快。
+     */
+    const val MAX_PER_SOURCE_SAMPLE: Int = 3_000
 
     /**
      * 单源响应字节上限（原版对大源按 sample_limit 抽样控内存；这里按字节截断兜底）。
@@ -57,10 +64,10 @@ object CfCandidateSource {
     private const val MAX_SOURCE_BYTES: Int = 4 * 1024 * 1024
 
     /**
-     * 每轮探测的候选硬上限（Python 用 3000 sample_limit；Android MVP 探测是有界子集，
-     * 物理网络探测是瓶颈，不是候选池）。
+     * 每轮候选池上限的默认值（协调器会显式传"便宜层上限"= 昂贵层 × RAW_POOL_FACTOR）。
+     * 这里是**便宜层**语义：只付 TCP connect 的价钱，真正的昂贵段由 maxCandidates 单独封顶。
      */
-    const val MAX_CANDIDATES: Int = 100
+    const val MAX_CANDIDATES: Int = 300
 
     /** 连接/读取超时（毫秒）。公网静态文本源；不静默重试，失败即失败。 */
     private const val CONNECT_TIMEOUT_MS: Int = 5_000
@@ -92,7 +99,7 @@ object CfCandidateSource {
             try {
                 val lines = downloadLines(network, url)
                     .shuffled(rnd)
-                    .take(perSourceSample.coerceIn(1, 500))
+                    .take(perSourceSample.coerceIn(1, MAX_PER_SOURCE_SAMPLE))
 
                 for (candidate in parseCandidates(lines, excludedRegions)) {
                     merged.putIfAbsent("${candidate.address}:${candidate.port}", candidate)
@@ -103,7 +110,10 @@ object CfCandidateSource {
             }
         }
 
-        val result = merged.values.shuffled(rnd).take(maxCandidates.coerceIn(1, 1000))
+        // 上限不再写死 1000：那个数会把放大后的池子悄悄砍掉一半。
+        // 用引擎侧的两层配额上限（RAW_POOL_CEILING），保证"用户设的池子"真的按用户设的来。
+        val result = merged.values.shuffled(rnd)
+            .take(maxCandidates.coerceIn(1, CfOptimizerEngine.RAW_POOL_CEILING))
         if (result.isEmpty() && lastError != null) throw lastError
 
         return result

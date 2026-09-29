@@ -106,21 +106,34 @@ class CfOptimizerSettingsStore(context: Context) {
 
     val sourcesPerRun: Int get() = sourcesPerRunRaw.toIntOrNull() ?: 8
 
-    /** 单源抽样条数（原版 sample_limit 的手机端等比；默认 40）。 */
+    /**
+     * 单源抽样条数（原版 `sample_limit` 的手机端等价物；默认 250）。
+     *
+     * 250 × [sourcesPerRun]=8 ≈ 2000 条原始候选 —— 与原版 `sample_limit=3000` 同一量级。
+     * 这个数是**便宜层**：只付 TCP connect 的价钱（1s 超时、200 并发），
+     * 真正进 TTFB 段的由 [maxCandidates] 单独封顶。
+     */
     var perSourceSampleRaw: String by store.string(
         key = "cfoptimizer_per_source_sample",
-        defaultValue = "40",
+        defaultValue = "250",
     )
 
-    val perSourceSample: Int get() = perSourceSampleRaw.toIntOrNull() ?: 40
+    val perSourceSample: Int get() = perSourceSampleRaw.toIntOrNull() ?: 250
 
-    /** 每轮进入探测的候选上限（默认 80：探测是耗时大头，100 → 80 让整轮稳定在 1~2 分钟）。 */
+    /**
+     * 每轮进入 TTFB 探测的候选上限（**昂贵层**，默认 300）。
+     *
+     * 只作用在 TCP 存活集上：原始池 = 本值 × [CfOptimizerEngine.RAW_POOL_FACTOR]（10），
+     * 即默认 300 → 原始池 3000、TCP 存活率 10% 时正好填满这一层。
+     * 旧默认 80 之所以"选不出东西"，是因为它同时也是原始池上限 —— 探索面只有 80 条，
+     * 而其中大部分还是死的；漏斗把"确认死 IP"的成本压下去之后，探索面才谈得上放大。
+     */
     var maxCandidatesRaw: String by store.string(
         key = "cfoptimizer_max_candidates",
-        defaultValue = "80",
+        defaultValue = "300",
     )
 
-    val maxCandidates: Int get() = maxCandidatesRaw.toIntOrNull() ?: 80
+    val maxCandidates: Int get() = maxCandidatesRaw.toIntOrNull() ?: 300
 
     /** 上传质量门（原版 SMART_PUSH_MIN_NODES=2；这里默认 5 防侥幸覆盖共享列表）。 */
     var minUploadEntriesRaw: String by store.string(
