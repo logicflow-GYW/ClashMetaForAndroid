@@ -38,7 +38,10 @@ class CfOptimizerSettingsActivity : BaseActivity<CfOptimizerSettingsDesign>() {
                     when (it) {
                         CfOptimizerSettingsDesign.Request.OpenParams -> {
                             startActivity(
-                                Intent(this, CfOptimizerParamsActivity::class.java),
+                                Intent(
+                                    this@CfOptimizerSettingsActivity,
+                                    CfOptimizerParamsActivity::class.java,
+                                ),
                             )
                         }
                         CfOptimizerSettingsDesign.Request.RunCfOptimizer -> {
