@@ -9,7 +9,10 @@ on:
 
 jobs:
   BuildApk:
-    runs-on: ubuntu-latest
+    # 钉住具体镜像而不是 ubuntu-latest：2026-10-19 起 ubuntu-latest 会迁到 Ubuntu 26，
+    # 到时构建环境会在两次 push 之间静默换掉。当前 latest 实测就是 ubuntu-24.04
+    # （runner 日志 Image: ubuntu-24.04），所以这里是零变化，只是把升级变成显式动作。
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
