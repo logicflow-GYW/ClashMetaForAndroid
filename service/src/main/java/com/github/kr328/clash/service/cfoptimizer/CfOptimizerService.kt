@@ -50,6 +50,8 @@ class CfOptimizerService : BaseService() {
         super.onStartCommand(intent, flags, startId)
 
         if (intent?.action == CfOptimizerIntents.ACTION_RUN_NOW) {
+            CfLog.i("service: run requested (manual/auto-heal)")
+
             launch {
                 runOptimization()
                 delay(TimeUnit.SECONDS.toMillis(2))
@@ -79,6 +81,7 @@ class CfOptimizerService : BaseService() {
             StateStore(this).saveRunState(CfOptimizerCoordinator.STAGE_DONE, 0, 0)
             updateForegroundNotification(getString(R.string.running))
             notifyResult(getString(R.string.cf_optimizer_result_failure, e.message ?: "unknown"))
+            CfLog.e("service: run crashed: ${e.javaClass.simpleName}: ${e.message}", e)
             return
         }
 
@@ -90,10 +93,14 @@ class CfOptimizerService : BaseService() {
         when {
             !result.uploaded ->
                 notifyResult(getString(R.string.cf_optimizer_result_failure, result.uploadReason ?: "unknown"))
-            !result.profileUpdated && result.profileError != null ->
+            !result.profileUpdated && result.profileError != null -> {
+                CfLog.w("service: run uploaded but profile refresh failed: ${result.profileError}")
                 notifyResult(getString(R.string.cf_optimizer_result_profile_failed, result.profileError ?: "unknown"))
-            else ->
+            }
+            else -> {
+                CfLog.i("service: run finished uploaded=true qualified=${result.qualifiedCount}")
                 notifyResult(getString(R.string.cf_optimizer_result_success, result.qualifiedCount))
+            }
         }
     }
 

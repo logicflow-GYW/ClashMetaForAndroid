@@ -4,7 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
-import com.github.kr328.clash.common.log.Log
+import com.github.kr328.clash.service.cfoptimizer.CfLog
 import java.security.KeyStore
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -98,7 +98,7 @@ class KeystoreCfOptimizerSecretStore(context: Context) : CfOptimizerSecretStore 
         }
 
         if (plain == null) {
-            Log.w("CF optimizer secret unrecoverable, cleared (re-entry required)")
+            CfLog.w("CF optimizer secret unrecoverable, cleared (re-entry required)")
 
             clearPassword()
 
