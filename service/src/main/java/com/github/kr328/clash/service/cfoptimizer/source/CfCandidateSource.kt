@@ -2,6 +2,7 @@ package com.github.kr328.clash.service.cfoptimizer.source
 
 import android.net.Network
 import com.github.kr328.clash.service.cfoptimizer.CandidateIp
+import com.github.kr328.clash.service.cfoptimizer.CfLog
 import com.github.kr328.clash.service.cfoptimizer.CfOptimizerEngine
 import com.github.kr328.clash.service.cfoptimizer.net.PhysicalNetwork
 import java.io.IOException
@@ -125,32 +126,57 @@ object CfCandidateSource {
         } catch (e: IOException) {
             lastError = e
             if (useDefaultRouting || network == null) {
+                CfLog.w("source fetch failed route=default error=${e.javaClass.simpleName}: ${e.message}")
                 null
             } else {
+                CfLog.w("source fetch failed route=physical error=${e.javaClass.simpleName}, retry via default routing")
                 try {
                     downloadLines(null, url).also { useDefaultRouting = true }
                 } catch (e2: IOException) {
                     lastError = e2
+                    CfLog.w("source fallback retry also failed: ${e2.javaClass.simpleName}: ${e2.message}")
                     null
                 }
             }
         }
 
         for (url in sources) {
-            val lines = fetchLines(url) ?: continue
+            val startedAtMs = System.currentTimeMillis()
+            val lines = fetchLines(url)
 
-            for (candidate in parseCandidates(
+            if (lines == null) {
+                CfLog.w(
+                    "source failed url=${shortSourceUrl(url)} " +
+                        "error=${lastError?.javaClass?.simpleName ?: "unknown"}",
+                )
+                continue
+            }
+
+            val parsed = parseCandidates(
                 lines.shuffled(rnd).take(perSourceSample.coerceIn(1, MAX_PER_SOURCE_SAMPLE)),
                 excludedRegions,
-            )) {
+            )
+
+            for (candidate in parsed) {
                 merged.putIfAbsent("${candidate.address}:${candidate.port}", candidate)
             }
+
+            CfLog.i(
+                "source ok lines=${lines.size} kept=${parsed.size} merged=${merged.size} " +
+                    "elapsed=${System.currentTimeMillis() - startedAtMs}ms url=${shortSourceUrl(url)}",
+            )
         }
 
         // 上限不再写死 1000：那个数会把放大后的池子悄悄砍掉一半。
         // 用引擎侧的两层配额上限（RAW_POOL_CEILING），保证"用户设的池子"真的按用户设的来。
         val result = merged.values.shuffled(rnd)
             .take(maxCandidates.coerceIn(1, CfOptimizerEngine.RAW_POOL_CEILING))
+
+        CfLog.i(
+            "sources done total=${sources.size} merged=${merged.size} pool=${result.size} " +
+                "lastError=${lastError?.javaClass?.simpleName ?: "none"}",
+        )
+
         if (result.isEmpty() && lastError != null) throw lastError
 
         return result
@@ -164,6 +190,7 @@ object CfCandidateSource {
         scrapeNavigationSite(network)
     } catch (e: IOException) {
         if (network == null) throw e
+        CfLog.w("source discovery failed route=physical error=${e.javaClass.simpleName}, retry via default routing")
         scrapeNavigationSite(null)
     }
 
@@ -180,6 +207,9 @@ object CfCandidateSource {
             .distinct()
             .toList()
     }
+
+    /** 源 URL 的日志形态：去掉 query（防个别源把 token 放 query 里被写进日志）。 */
+    private fun shortSourceUrl(url: String): String = url.substringBefore('?')
 
     /** 下载源文本并解析为候选（黑名单地区后缀行直接丢弃）。 */
     private fun parseCandidates(lines: List<String>, excludedRegions: Set<String>): List<CandidateIp> =
@@ -213,7 +243,10 @@ object CfCandidateSource {
 
         try {
             if (connection.responseCode !in 200..299) {
-                throw IOException("source HTTP ${connection.responseCode}: $url")
+                // 异常消息会被上游原样带进日志（fetchLines catch 的 route=default 行、
+                // Coordinator 的 candidates_* abort 行），所以这里就去 query——与
+                // shortSourceUrl 同一契约：个别源把 token 放 query，不能经异常消息落 logcat。
+                throw IOException("source HTTP ${connection.responseCode}: ${shortSourceUrl(url)}")
             }
 
             val stream = connection.inputStream

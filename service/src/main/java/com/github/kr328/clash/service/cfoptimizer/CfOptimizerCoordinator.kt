@@ -49,13 +49,16 @@ class CfOptimizerCoordinator(private val context: Context) {
      */
     suspend fun run(onProgress: suspend (stage: String, progress: Int, total: Int) -> Unit = { _, _, _ -> }): Result {
         val startedAt = System.currentTimeMillis()
+        val runId = startedAt.toString(36)
         val recorder = CfRunRecorder()
         val runLog = CfOptimizerRunLog(context)
+
+        CfLog.i("run=$runId start")
 
         var outcome: CfOptimizerRunLog.Outcome? = null
 
         try {
-            val result = runRecorded(recorder, onProgress)
+            val result = runRecorded(runId, recorder, onProgress)
 
             outcome = CfOptimizerRunLog.Outcome(
                 uploaded = result.uploaded,
@@ -66,14 +69,20 @@ class CfOptimizerCoordinator(private val context: Context) {
             return result
         } catch (e: Exception) {
             recorder.failReason = e.javaClass.simpleName
+            CfLog.e("run=$runId crashed: ${e.javaClass.simpleName}: ${e.message}", e)
 
             throw e
         } finally {
             runLog.persist(recorder, outcome, startedAt)
+            CfLog.i(
+                "run=$runId end duration=${(System.currentTimeMillis() - startedAt) / 1000}s " +
+                    "uploaded=${outcome?.uploaded ?: false} reason=${outcome?.reason ?: recorder.failReason ?: "none"}",
+            )
         }
     }
 
     private suspend fun runRecorded(
+        runId: String,
         recorder: CfRunRecorder,
         onProgress: suspend (stage: String, progress: Int, total: Int) -> Unit,
     ): Result {
@@ -84,11 +93,13 @@ class CfOptimizerCoordinator(private val context: Context) {
         val profileId = settingsStore.subscriptionProfileId
 
         if (baseUrl.isBlank()) {
+            CfLog.w("run=$runId abort reason=not_configured (worker URL empty; set it in settings)")
             return Result(0, 0, false, "not_configured", false, null)
         }
 
         val password = secretStore.readPassword()
         if (password.isNullOrEmpty()) {
+            CfLog.w("run=$runId abort reason=password_missing (re-enter worker password in settings)")
             return Result(0, 0, false, "password_missing", false, null)
         }
 
@@ -127,8 +138,10 @@ class CfOptimizerCoordinator(private val context: Context) {
         var stageStartedAtMs = System.currentTimeMillis()
 
         fun markStage(stage: String) {
-            stageSeconds[stage] = (System.currentTimeMillis() - stageStartedAtMs) / 1000.0
+            val elapsedSeconds = (System.currentTimeMillis() - stageStartedAtMs) / 1000.0
+            stageSeconds[stage] = elapsedSeconds
             stageStartedAtMs = System.currentTimeMillis()
+            CfLog.i("run=$runId stage=$stage seconds=$elapsedSeconds")
         }
         val minUploadEntries = settingsStore.minUploadEntries
         val maxPerRegion = settingsStore.maxPerRegion
@@ -141,6 +154,18 @@ class CfOptimizerCoordinator(private val context: Context) {
         // 淘汰/衰减阈值随用户参数走（原版那 5 个常量在设置页可调）。
         val memory = if (memoryEnabled) CfMemoryStore(context, settingsStore.memoryTuning) else null
 
+        // 本轮配置快照（一行）：参数页任何一项改动都会在这里留痕，"这轮行为为什么和上轮
+        // 不同"不需要再猜。不含任何凭据（worker URL/密码一律不进日志）。
+        CfLog.i(
+            "run=$runId config maxCandidates=$maxCandidates rawPoolFactor=${settingsStore.rawPoolFactor} " +
+                "rawPoolLimit=$rawPoolLimit sourcesPerRun=$sourcesPerRun perSourceSample=$perSourceSample " +
+                "tcp=${probeConfig.tcpConcurrency}@${probeConfig.tcpTimeoutMs}ms " +
+                "trace=${probeConfig.traceConcurrency} ttfb=${probeConfig.probeConcurrency}x${probeConfig.ttfbSamples} " +
+                "download=$downloadTestEnabled memory=${if (memoryEnabled) "on pool=$memoryPoolLimit" else "off"} " +
+                "gate=$minUploadEntries maxPerRegion=$maxPerRegion " +
+                "exclude=[${excludeCountries.joinToString(",")}] only=[${onlyCountries.joinToString(",")}]",
+        )
+
         // 物理网络出口：探测 / 上传 Java 侧网络 I/O 统一绑它。
         // 不绑的后果（真机实测）：开着代理时请求回流进本应用 TUN → 被自己的规则送进代理
         // 节点 → 上传失败/超时，而关掉代理就一切正常。
@@ -148,6 +173,8 @@ class CfOptimizerCoordinator(private val context: Context) {
         // 时 CfCandidateSource 有界回落默认路由（开代理时由代理代拉文本源）—— 拉源只是文本
         // 下载，不涉及探测真实性；探测/上传不受影响。
         val physicalNetwork = PhysicalNetwork.pick(context)
+
+        CfLog.i("run=$runId net physical=${if (physicalNetwork == null) "none(default)" else "bound"}")
 
         // 1. 源发现（导航站 → 缓存 → 内置兜底）+ 拉取候选。
         val state = StateStore(context)
@@ -157,6 +184,7 @@ class CfOptimizerCoordinator(private val context: Context) {
         val discovered = try {
             CfCandidateSource.discoverSourceUrls(physicalNetwork)
         } catch (e: Exception) {
+            CfLog.w("run=$runId sources discover failed: ${e.javaClass.simpleName}, fallback to cached/builtin")
             emptyList()
         }
         if (discovered.isNotEmpty()) {
@@ -167,6 +195,11 @@ class CfOptimizerCoordinator(private val context: Context) {
                 (discovered.ifEmpty { state.cachedSourceUrls() }).shuffled()
                     .take(sourcesPerRun.coerceIn(1, CfOptimizerTuning.SOURCES_PER_RUN_MAX))
 
+        CfLog.i(
+            "run=$runId sources total=${sources.size} discovered=${discovered.size} " +
+                "cacheFallback=${discovered.isEmpty()}",
+        )
+
         val candidates = try {
             CfCandidateSource.fetchFrom(
                 sources,
@@ -176,10 +209,12 @@ class CfOptimizerCoordinator(private val context: Context) {
                 network = physicalNetwork,
             )
         } catch (e: Exception) {
+            CfLog.e("run=$runId abort reason=candidates_${e.javaClass.simpleName}: ${e.message}", e)
             return Result(0, 0, false, "candidates_${e.javaClass.simpleName}", false, null)
         }
 
         markStage(STAGE_SOURCES)
+        CfLog.i("run=$runId sources done candidates=${candidates.size}")
 
         // 1.5 优先复测池 = 记忆库置信度 top-N（跨轮历史）+ 上轮写入 Worker 的节点。
         //     记忆库比 last-known-good 更准：它记得谁**稳定**，而不只是谁上一轮在名单里；
@@ -210,7 +245,13 @@ class CfOptimizerCoordinator(private val context: Context) {
             .distinctBy { it.address to it.port }
             .take(rawPoolLimit + memoryPoolLimit)
 
+        CfLog.i(
+            "run=$runId pool memory=${memoryCandidates.size} lastGood=${lastGoodCandidates.size} " +
+                "fresh=${freshCandidates.size} blocked=${blockedAddresses.size} pooled=${pooled.size}",
+        )
+
         if (pooled.isEmpty()) {
+            CfLog.w("run=$runId abort reason=no_candidates (pool empty after memory/lastgood/fresh merge)")
             return Result(0, 0, false, "no_candidates", false, null)
         }
 
@@ -227,10 +268,17 @@ class CfOptimizerCoordinator(private val context: Context) {
         }
 
         markStage(STAGE_TCP)
+        CfLog.i("run=$runId tcp alive=${tcpAlive.size}/${pooled.size}")
 
         val allCandidates = tcpAlive.take(maxCandidates + memoryPoolLimit)
+        if (allCandidates.size < tcpAlive.size) {
+            CfLog.i(
+                "run=$runId tcp survivors cut ${tcpAlive.size}->${allCandidates.size} (cap=${maxCandidates + memoryPoolLimit})",
+            )
+        }
 
         if (allCandidates.isEmpty()) {
+            CfLog.w("run=$runId abort reason=no_reachable_candidates (tcp prefilter returned none)")
             return Result(0, 0, false, "no_reachable_candidates", false, null)
         }
 
@@ -247,6 +295,7 @@ class CfOptimizerCoordinator(private val context: Context) {
         }
 
         markStage(STAGE_TRACE)
+        CfLog.i("run=$runId trace resolved=${regions.size}/${allCandidates.size}")
 
         // 2.3 国家过滤（原版 EXCLUDE_COUNTRIES / ONLY_COUNTRIES）：黑名单（trace loc 命中）
         //     不进 TTFB 采样/评分/上传；白名单启用时只保留命中国家。
@@ -260,6 +309,8 @@ class CfOptimizerCoordinator(private val context: Context) {
             true
         }
 
+        CfLog.i("run=$runId regionFilter kept=${probed.size}/${allCandidates.size}")
+
         // 2.5 TTFB 采样（绑定 Network 的 socket，绕开本应用 VPN）。进度实时上报。
         //     只作用于**通过地区过滤**的候选 —— 这是探测预算真正该花的地方。
         val metrics = probe.measure(probed, regions) { done, total ->
@@ -268,6 +319,7 @@ class CfOptimizerCoordinator(private val context: Context) {
         }
 
         markStage(STAGE_PROBE)
+        CfLog.i("run=$runId probe measured=${metrics.size}/${probed.size}")
 
         // 2.7 下载测速（默认开）：评分公式里带宽占 40%，此前该分量恒为 0 —— 等于只按
         //     延迟选节点。只测 TTFB 最优的窄池（原脚本 TTFB_POOL_LIMIT 语义），
@@ -279,6 +331,8 @@ class CfOptimizerCoordinator(private val context: Context) {
                 .take(probeConfig.downloadPoolLimit)
                 .map { it.first }
 
+            CfLog.i("run=$runId download pool=${pool.size} (limit=${probeConfig.downloadPoolLimit})")
+
             state.saveRunState(STAGE_DOWNLOAD, 0, pool.size)
             onProgress(STAGE_DOWNLOAD, 0, pool.size)
 
@@ -287,10 +341,12 @@ class CfOptimizerCoordinator(private val context: Context) {
                 onProgress(STAGE_DOWNLOAD, done, total)
             }
         } else {
+            CfLog.i("run=$runId download skipped (enabled=$downloadTestEnabled probed=${probed.size})")
             emptyMap()
         }
 
         markStage(STAGE_DOWNLOAD)
+        CfLog.i("run=$runId download measured=${downloads.size}")
 
         val scoredMetrics = if (downloads.isEmpty()) {
             metrics
@@ -330,14 +386,19 @@ class CfOptimizerCoordinator(private val context: Context) {
         }
 
         var ranked = CfOptimizerEngine.rank(rankPool, scoredMetrics, limits)
+        CfLog.i("run=$runId rank in=${rankPool.size} out=${ranked.size} minScore=${limits.minScore}")
 
         // 3.5 CIDR 前缀去重（原版 cidr_seen 语义）：同一前缀只保留最高分，
         //     让 Worker 列表分散在不同网段；去重后不足质量门则不上传。
+        val rankedBeforeDedupe = ranked.size
         ranked = dedupeByPrefix(ranked, settingsStore.dedupPrefixV4)
+        CfLog.i(
+            "run=$runId dedupe prefix=/${settingsStore.dedupPrefixV4} $rankedBeforeDedupe->${ranked.size}",
+        )
 
         // 3.7 记忆库写回（原版 record_result）。放在这里而不是"上传成功后"：
         //     质量门不足 / 上传失败的轮次同样长记忆——失败轮恰恰是记忆库最该记住的。
-        recordMemory(memory, allCandidates, scoredMetrics, ranked)
+        recordMemory(runId, memory, allCandidates, scoredMetrics, ranked)
 
         markStage(STAGE_RANK)
 
@@ -356,6 +417,9 @@ class CfOptimizerCoordinator(private val context: Context) {
         recorder.stageSeconds = stageSeconds.toMap()
 
         if (ranked.size < minUploadEntries) {
+            CfLog.w(
+                "run=$runId abort reason=below_quality_gate ranked=${ranked.size} < minUploadEntries=$minUploadEntries",
+            )
             return Result(allCandidates.size, ranked.size, false, "below_quality_gate", false, null)
         }
 
@@ -365,26 +429,38 @@ class CfOptimizerCoordinator(private val context: Context) {
         onProgress(STAGE_UPLOAD, 0, 1)
         val entries = settingsStore.customEntries.orEmpty().filter { it.isNotBlank() } +
                 ranked.map { it.toWorkerLine() }
+        CfLog.i(
+            "run=$runId upload begin entries=${entries.size} (custom=${entries.size - ranked.size} ranked=${ranked.size})",
+        )
 
         // 5. 上传 Worker（整体覆写语义：只在本轮有达标结果时才覆盖）。
         val client = CfWorkerClient(
             CfWorkerSettings(baseUrl, password),
             UrlConnectionWorkerHttpTransport(context),
         )
+        val uploadStartedAt = System.currentTimeMillis()
         val uploadResult = client.upload(entries)
 
         val uploaded = uploadResult is WorkerUploadResult.Success
         val uploadReason = (uploadResult as? WorkerUploadResult.Failure)?.reason?.name
 
         if (!uploaded) {
+            CfLog.w(
+                "run=$runId abort reason=upload_$uploadReason entries=${entries.size} " +
+                    "after=${System.currentTimeMillis() - uploadStartedAt}ms",
+            )
             return Result(allCandidates.size, ranked.size, false, uploadReason, false, null)
         }
+        CfLog.i(
+            "run=$runId upload ok entries=${entries.size} after=${System.currentTimeMillis() - uploadStartedAt}ms",
+        )
 
         state.saveRunState(STAGE_UPLOAD, 1, 1)
         onProgress(STAGE_UPLOAD, 1, 1)
 
         // 6. 上传成功：先保存 last-known-good（下次空扫描/失败时可参考），再刷新订阅。
         StateStore(context).saveLastKnownGood(entries)
+        CfLog.i("run=$runId lastKnownGood saved entries=${entries.size}")
 
         var profileUpdated = false
         var profileError: String? = null
@@ -399,13 +475,22 @@ class CfOptimizerCoordinator(private val context: Context) {
                     if (attempt > 0) delay(TimeUnit.SECONDS.toMillis(2))
                     updateProfile(profileId)
                     profileUpdated = true
+                    CfLog.i("run=$runId profile refresh ok attempt=${attempt + 1}")
                 } catch (e: Exception) {
                     // 上传已成功、订阅刷新失败：如实区分，不称全链路成功。
                     profileError = e.message ?: "unknown"
+                    CfLog.w(
+                        "run=$runId profile refresh failed attempt=${attempt + 1}/2: " +
+                            "${e.javaClass.simpleName}: ${e.message}",
+                    )
                 }
             }
         }
 
+        CfLog.i(
+            "run=$runId done uploaded=true qualified=${ranked.size} profileUpdated=$profileUpdated " +
+                "profileError=${profileError ?: "none"}",
+        )
         return Result(candidates.size, ranked.size, true, null, profileUpdated, profileError)
     }
 
@@ -416,6 +501,7 @@ class CfOptimizerCoordinator(private val context: Context) {
      * - 连不上 → fail：fail_streak +1，达到阈值后进入冷却，下轮不再浪费探测配额
      */
     private fun recordMemory(
+        runId: String,
         memory: CfMemoryStore?,
         candidates: List<CandidateIp>,
         metrics: Map<CandidateIp, ProbeMetrics>,
@@ -459,6 +545,10 @@ class CfOptimizerCoordinator(private val context: Context) {
         }
 
         memory.flush()
+        CfLog.i(
+            "run=$runId memory writeback candidates=${candidates.size} selected=${ranked.size} " +
+                "measured=${metrics.size}",
+        )
     }
 
     /**

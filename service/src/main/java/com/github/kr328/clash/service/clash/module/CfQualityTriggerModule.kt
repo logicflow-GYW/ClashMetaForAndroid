@@ -2,9 +2,9 @@ package com.github.kr328.clash.service.clash.module
 
 import android.app.Service
 import android.content.Intent
-import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.core.Clash
 import com.github.kr328.clash.core.model.ProxySort
+import com.github.kr328.clash.service.cfoptimizer.CfLog
 import com.github.kr328.clash.service.cfoptimizer.quality.CfQualityGate
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerIntents
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsStore
@@ -46,18 +46,20 @@ class CfQualityTriggerModule(service: Service) : Module<Unit>(service) {
                 settings.minIntervalHours.toLong(),
             )
 
-            Log.i(
+            CfLog.i(
                 "CF quality check: nodes=${delays.size} verdict=${verdict.reason ?: "healthy"}",
             )
 
             if (!verdict.shouldRun) return
+
+            CfLog.i("CF quality degraded -> triggering optimizer run")
 
             // 与设置页「立即运行」同一条路：包内广播 → CfOptimizerReceiver → 前台服务。
             service.sendBroadcast(
                 Intent(CfOptimizerIntents.ACTION_RUN_NOW).setPackage(service.packageName),
             )
         } catch (e: Exception) {
-            Log.w("CF quality check failed", e)
+            CfLog.w("CF quality check failed", e)
         }
     }
 
