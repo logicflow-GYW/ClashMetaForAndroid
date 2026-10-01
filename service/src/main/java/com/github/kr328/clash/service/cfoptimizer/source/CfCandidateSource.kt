@@ -83,7 +83,7 @@ object CfCandidateSource {
      */
     const val MAX_CANDIDATES: Int = 300
 
-    /** 连接/读取超时（毫秒）。公网静态文本源；不静默重试，失败即失败。 */
+    /** 连接/读取超时（毫秒）。公网静态文本源；直连失败的有界回落见 [fetchFrom]，不做无界重试。 */
     private const val CONNECT_TIMEOUT_MS: Int = 5_000
     private const val READ_TIMEOUT_MS: Int = 10_000
 
@@ -109,18 +109,41 @@ object CfCandidateSource {
         val merged = LinkedHashMap<String, CandidateIp>()
         var lastError: IOException? = null
 
-        for (url in sources) {
-            try {
-                val lines = downloadLines(network, url)
-                    .shuffled(rnd)
-                    .take(perSourceSample.coerceIn(1, MAX_PER_SOURCE_SAMPLE))
+        // 直连回落（R1，2026-10-01 诊断）：CN 蜂窝直连 GitHub/pages.dev 等 SNI 封锁源会
+        // 超时/复位，原始池因此塌缩（真机 7 轮实测 211-442 条；默认参数 15 源 × 1000/源，
+        // 光 zip.cm 一家就有 14875 行）。主网络拉取失败时回落系统默认路由（null = 开代理时
+        // 回流进本应用 TUN，由代理代拉）—— 拉源只是文本下载，不涉及探测真实性；探测 /
+        // 上传仍固定走物理网络（见 Coordinator 绑定注释）。
+        // ponytail: 每源至多一次回落、不跨轮记忆网络健康 | 天花板: 默认路由也不通时每源付双倍超时 | 升级触发: sources 段时长膨胀且 candidates_raw 仍低
+        var useDefaultRouting = false
 
-                for (candidate in parseCandidates(lines, excludedRegions)) {
-                    merged.putIfAbsent("${candidate.address}:${candidate.port}", candidate)
+        // 单源失败不拖垮整轮（原版 fetch_urls_classified 同语义），记录最后一个错误；
+        // 直连失败回落默认路由再试一次（有界：不叠第二次）。粘性：默认路由验证成功后，
+        // 剩余源不再重复付直连超时的价钱。
+        fun fetchLines(url: String): List<String>? = try {
+            downloadLines(if (useDefaultRouting) null else network, url)
+        } catch (e: IOException) {
+            lastError = e
+            if (useDefaultRouting || network == null) {
+                null
+            } else {
+                try {
+                    downloadLines(null, url).also { useDefaultRouting = true }
+                } catch (e2: IOException) {
+                    lastError = e2
+                    null
                 }
-            } catch (e: IOException) {
-                // 单源失败不拖垮整轮（原版 fetch_urls_classified 同语义），记录最后一个错误。
-                lastError = e
+            }
+        }
+
+        for (url in sources) {
+            val lines = fetchLines(url) ?: continue
+
+            for (candidate in parseCandidates(
+                lines.shuffled(rnd).take(perSourceSample.coerceIn(1, MAX_PER_SOURCE_SAMPLE)),
+                excludedRegions,
+            )) {
+                merged.putIfAbsent("${candidate.address}:${candidate.port}", candidate)
             }
         }
 
@@ -135,8 +158,14 @@ object CfCandidateSource {
 
     /**
      * 源发现：抓取导航站并提取 .txt IP 源链接。失败抛 [IOException]（调用方走缓存/内置兜底）。
+     * 直连拉不动时有界回落系统默认路由（拉源只是文本下载；语义同 [fetchFrom] 的回落）。
      */
-    fun discoverSourceUrls(network: Network? = null): List<String> = scrapeNavigationSite(network)
+    fun discoverSourceUrls(network: Network? = null): List<String> = try {
+        scrapeNavigationSite(network)
+    } catch (e: IOException) {
+        if (network == null) throw e
+        scrapeNavigationSite(null)
+    }
 
     /** 抓取导航站并提取 .txt IP 源链接（原版 scrape `<span class="url-text">` 语义）。 */
     private fun scrapeNavigationSite(network: Network?): List<String> {
@@ -164,14 +193,16 @@ object CfCandidateSource {
             .distinctBy { it.address to it.port }
             .toList()
 
-    /** 下载并按行返回（8s 读超时；字节截断兜底）。失败抛 [IOException]。 */
+    /** 下载并按行返回（10s 读超时；字节截断兜底）。失败抛 [IOException]。 */
     private fun downloadLines(network: Network?, url: String): List<String> =
         downloadText(network, url, MAX_SOURCE_BYTES).lineSequence().filter { it.isNotBlank() }.toList()
 
     /**
-     * 下载文本源。连接**固定走物理网络**（[PhysicalNetwork]）：开着代理时裸
+     * 下载文本源。连接默认走 [network] 绑定的网络（null = 系统默认路由）：开着代理时裸
      * `URL.openConnection()` 会回流进本应用 TUN，被自己的规则送进代理节点，
      * 表现为「关代理顺利、开代理拉源失败」。
+     *
+     * 直连回落由调用方做（[fetchFrom] / [discoverSourceUrls]）—— 本函数保持单路径纯下载。
      */
     private fun downloadText(network: Network?, url: String, maxBytes: Int): String {
         val connection = PhysicalNetwork.openConnection(network, URL(url)) as HttpURLConnection
