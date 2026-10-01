@@ -58,10 +58,12 @@ object CfCandidateSource {
      */
     val EXCLUDED_SOURCE_REGIONS: Set<String> = setOf("RU", "KP", "CN", "HK")
 
-    /** 每轮从导航站源池随机抽取的源数上限（手机端有界化；原版全量装载、按 sample_limit 抽样）。 */
-    const val SOURCES_PER_RUN: Int = 4
-
-    /** 单源单轮抽样上限（原版 bulk 3000 / normal 1000 的手机端等比缩减；默认 250 × 8 源 ≈ 2000 条原始池）。 */
+    /**
+     * 单源单轮抽样上限的默认参数值（调用方不传时才生效）。生产路径由
+     * [com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerTuning.PER_SOURCE_SAMPLE_DEFAULT]
+     * 驱动 —— 默认 1000 条/源 × [com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerTuning.SOURCES_PER_RUN_DEFAULT]
+     * 个源，再由每轮候选池上限封顶。
+     */
     const val PER_SOURCE_SAMPLE: Int = 250
 
     /**
