@@ -89,7 +89,11 @@ object CfMemoryScoring {
 
         calendar.timeInMillis = nowSeconds * 1000L
 
-        return calendar.get(Calendar.HOUR_OF_DAY) / (24 / tuning.hourBuckets)
+        // 等分映射：`hour * buckets / 24` 对 buckets ∈ {1,2,3,4,6,8,12}（24 的约数）
+        // 与旧式 `hour / (24 / buckets)` 逐值相同，对 5/7/9/10/11 则给出用户设定的
+        // 桶数（旧式会偏出 1-2 个桶：设 5 → 实际 6 桶，设 7 → 实际 8 桶），且
+        // hourBuckets=0 时不再除零。
+        return calendar.get(Calendar.HOUR_OF_DAY) * tuning.hourBuckets / 24
     }
 
     /**

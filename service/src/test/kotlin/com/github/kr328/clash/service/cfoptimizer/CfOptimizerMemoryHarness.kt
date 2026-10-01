@@ -1,6 +1,7 @@
 package com.github.kr328.clash.service.cfoptimizer
 
 import com.github.kr328.clash.service.cfoptimizer.memory.CfMemoryScoring
+import com.github.kr328.clash.service.cfoptimizer.memory.CfMemoryTuning
 import com.github.kr328.clash.service.cfoptimizer.memory.MemoryRecord
 import java.util.TimeZone
 
@@ -222,6 +223,48 @@ fun main() {
     check("超上限淘汰 3 条", CfMemoryScoring.evictOverflow(overflow, NOW) == 3)
     check("淘汰后正好到上限", overflow.size == 5000)
     check("无成功记录者优先被淘汰", "10.0.0:443" !in overflow)
+
+    // ---- 5. 时段桶等分映射（§43-6；旧式 `hour / (24 / buckets)` 在非约数桶数下偏桶）----
+    // 固定基准：2026-10-01 00:00 (+08:00) 的 epoch 秒，逐小时推进。
+    val midnight = java.util.Calendar.getInstance(ZONE).apply {
+        clear()
+        set(2026, java.util.Calendar.OCTOBER, 1, 0, 0, 0)
+    }.timeInMillis / 1000L
+
+    fun bucketAt(hour: Int, buckets: Int): Int =
+        CfMemoryScoring.hourBucket(midnight + hour * 3600L, ZONE, CfMemoryTuning(hourBuckets = buckets))
+
+    // 写死字面量的采样点（旧式在这些点给出错桶：5 桶制 hour=5 → 1 桶是对的，但 hour=23 会落到 5）。
+    check("buckets=5 hour=0 → 0", bucketAt(0, 5) == 0)
+    check("buckets=5 hour=4 → 0", bucketAt(4, 5) == 0)
+    check("buckets=5 hour=5 → 1", bucketAt(5, 5) == 1)
+    check("buckets=5 hour=23 → 4", bucketAt(23, 5) == 4)
+    check("buckets=7 hour=3 → 0", bucketAt(3, 7) == 0)
+    check("buckets=7 hour=4 → 1", bucketAt(4, 7) == 1)
+    check("buckets=7 hour=23 → 6", bucketAt(23, 7) == 6)
+    check("buckets=9 hour=2 → 0", bucketAt(2, 9) == 0)
+    check("buckets=9 hour=3 → 1", bucketAt(3, 9) == 1)
+    check("buckets=11 hour=23 → 10", bucketAt(23, 11) == 10)
+
+    // 每个设定桶数都必须真的产出那么多桶：桶号连续、单调不减、上界 = buckets-1。
+    for (buckets in listOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)) {
+        val seen = (0 until 24).map { bucketAt(it, buckets) }
+        check("buckets=$buckets 桶号上界 = ${buckets - 1}", seen.max() == buckets - 1)
+        check("buckets=$buckets 桶号无空洞", seen.toSet() == (0 until buckets).toSet())
+        check("buckets=$buckets 桶号单调不减", seen == seen.sorted())
+    }
+
+    // 等价性：24 的约数桶数下，新式与旧式 `hour / (24 / buckets)` 逐值相同。
+    for (buckets in listOf(1, 2, 3, 4, 6, 8, 12)) {
+        for (hour in 0 until 24) {
+            check("buckets=$buckets hour=$hour 与旧式等价", bucketAt(hour, buckets) == hour / (24 / buckets))
+        }
+    }
+    // 旧式在非约数桶数下确实偏桶（这就是被修的行为）：buckets=5 → 实际 6 桶。
+    check("旧式 buckets=5 会产出 6 个桶（回归锚点）",
+        (0 until 24).map { it / (24 / 5) }.toSet().size == 6)
+    check("新式 buckets=5 只产出 5 个桶",
+        (0 until 24).map { bucketAt(it, 5) }.toSet().size == 5)
 
     println("================================")
     println("CF 记忆库回归装置：$total 项断言，$failures 项失败")
