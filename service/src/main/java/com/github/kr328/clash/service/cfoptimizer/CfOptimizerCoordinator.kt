@@ -398,7 +398,7 @@ class CfOptimizerCoordinator(private val context: Context) {
 
         // 3.7 记忆库写回（原版 record_result）。放在这里而不是"上传成功后"：
         //     质量门不足 / 上传失败的轮次同样长记忆——失败轮恰恰是记忆库最该记住的。
-        recordMemory(memory, allCandidates, scoredMetrics, ranked)
+        recordMemory(runId, memory, allCandidates, scoredMetrics, ranked)
 
         markStage(STAGE_RANK)
 
@@ -501,6 +501,7 @@ class CfOptimizerCoordinator(private val context: Context) {
      * - 连不上 → fail：fail_streak +1，达到阈值后进入冷却，下轮不再浪费探测配额
      */
     private fun recordMemory(
+        runId: String,
         memory: CfMemoryStore?,
         candidates: List<CandidateIp>,
         metrics: Map<CandidateIp, ProbeMetrics>,
@@ -545,7 +546,7 @@ class CfOptimizerCoordinator(private val context: Context) {
 
         memory.flush()
         CfLog.i(
-            "memory writeback candidates=${candidates.size} selected=${ranked.size} " +
+            "run=$runId memory writeback candidates=${candidates.size} selected=${ranked.size} " +
                 "measured=${metrics.size}",
         )
     }

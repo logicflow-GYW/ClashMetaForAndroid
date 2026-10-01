@@ -243,7 +243,10 @@ object CfCandidateSource {
 
         try {
             if (connection.responseCode !in 200..299) {
-                throw IOException("source HTTP ${connection.responseCode}: $url")
+                // 异常消息会被上游原样带进日志（fetchLines catch 的 route=default 行、
+                // Coordinator 的 candidates_* abort 行），所以这里就去 query——与
+                // shortSourceUrl 同一契约：个别源把 token 放 query，不能经异常消息落 logcat。
+                throw IOException("source HTTP ${connection.responseCode}: ${shortSourceUrl(url)}")
             }
 
             val stream = connection.inputStream
