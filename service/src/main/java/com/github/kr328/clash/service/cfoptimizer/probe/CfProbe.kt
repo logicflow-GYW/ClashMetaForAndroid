@@ -343,6 +343,11 @@ class CfProbe(private val context: Context, private val config: CfProbeConfig = 
      * 在绑定 network 的 socket 上做一次 HTTP GET，返回 (耗时ms, 响应文本可选)。
      * HTTPS：先建裸 socket（绑定 network），再用系统默认 SSLSocketFactory 包一层 ——
      * 证书校验与 SNI 针对目标 host `cp.cloudflare.com` 完成，socket 仍绑定物理网络。
+     *
+     * 计时口径（2026-10-01 R4 修复）：计时点在 connect **之前** —— 耗时 = TCP connect +
+     * TLS 握手 + 请求写出 + 首字节，与原脚本 `sess.get`（force_close，每次新连接）同口径。
+     * 此前计时点在请求写出后，握手质量完全不参与排序 —— 而 VLESS 直连的真实体感恰恰
+     * 由 connect+TLS 主导。
      */
     private fun timedGet(
         network: Network,
@@ -357,6 +362,9 @@ class CfProbe(private val context: Context, private val config: CfProbeConfig = 
 
         try {
             socket.tcpNoDelay = true
+
+            // 计时起点在 connect 之前（R4 修复）：TTFB = TCP connect + TLS 握手 + 请求写出 + 首字节。
+            val start = System.nanoTime()
             socket.connect(InetSocketAddress(ip, port), CONNECT_TIMEOUT_MS)
             socket.soTimeout = READ_TIMEOUT_MS
 
@@ -379,7 +387,6 @@ class CfProbe(private val context: Context, private val config: CfProbeConfig = 
             )
             output.flush()
 
-            val start = System.nanoTime()
             val statusLine = input.readLine() ?: return null
             val elapsedMs = (System.nanoTime() - start) / 1_000_000
 

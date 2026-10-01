@@ -141,9 +141,12 @@ class CfOptimizerCoordinator(private val context: Context) {
         // 淘汰/衰减阈值随用户参数走（原版那 5 个常量在设置页可调）。
         val memory = if (memoryEnabled) CfMemoryStore(context, settingsStore.memoryTuning) else null
 
-        // 物理网络出口：本模块**所有** Java 侧网络 I/O（拉源 / 探测 / 上传）统一绑它。
+        // 物理网络出口：探测 / 上传 Java 侧网络 I/O 统一绑它。
         // 不绑的后果（真机实测）：开着代理时请求回流进本应用 TUN → 被自己的规则送进代理
         // 节点 → 上传失败/超时，而关掉代理就一切正常。
+        // 唯一例外 = 拉源（2026-10-01 R1 修复）：直连拉不动 GitHub/pages.dev 等 SNI 封锁源
+        // 时 CfCandidateSource 有界回落默认路由（开代理时由代理代拉文本源）—— 拉源只是文本
+        // 下载，不涉及探测真实性；探测/上传不受影响。
         val physicalNetwork = PhysicalNetwork.pick(context)
 
         // 1. 源发现（导航站 → 缓存 → 内置兜底）+ 拉取候选。
