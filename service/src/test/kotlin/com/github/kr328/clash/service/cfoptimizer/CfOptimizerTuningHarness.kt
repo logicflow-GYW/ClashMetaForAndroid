@@ -29,7 +29,7 @@ private fun check(name: String, cond: Boolean) {
 
 private fun near(a: Double, b: Double, eps: Double = 1e-9) = kotlin.math.abs(a - b) <= eps
 
-fun main() {
+fun runCfOptimizerTuningHarness() {
     // ---- 1. 默认值（字面量；等于移植时的原版/实测值）----
     check("sourcesPerRun 默认 12", CfOptimizerTuning.sourcesPerRun(null) == 12)
     check("perSourceSample 默认 1000", CfOptimizerTuning.perSourceSample(null) == 1000)

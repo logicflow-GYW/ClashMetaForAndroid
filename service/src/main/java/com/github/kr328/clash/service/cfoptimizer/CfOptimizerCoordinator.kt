@@ -1,6 +1,7 @@
 package com.github.kr328.clash.service.cfoptimizer
 
 import android.content.Context
+import com.github.kr328.clash.service.PreferenceProvider
 import com.github.kr328.clash.service.ProfileProcessor
 import com.github.kr328.clash.service.cfoptimizer.history.CfOptimizerRunLog
 import com.github.kr328.clash.service.cfoptimizer.history.CfRunRecorder
@@ -86,6 +87,7 @@ class CfOptimizerCoordinator(private val context: Context) {
         recorder: CfRunRecorder,
         onProgress: suspend (stage: String, progress: Int, total: Int) -> Unit,
     ): Result {
+        val state = StateStore(context)
         val settingsStore = CfOptimizerSettingsStore(context)
         val secretStore = KeystoreCfOptimizerSecretStore(context)
 
@@ -102,6 +104,10 @@ class CfOptimizerCoordinator(private val context: Context) {
             CfLog.w("run=$runId abort reason=password_missing (re-enter worker password in settings)")
             return Result(0, 0, false, "password_missing", false, null)
         }
+
+        // Record a real attempt only after the required configuration is valid.
+        // This prevents a broken setup from consuming the auto-heal cooldown.
+        state.saveAttemptStarted(runId)
 
         // 用户运行参数（模仿原版 cf_config.py，全部可配、空/非法回落默认）。
         val excludeCountries = settingsStore.excludeCountries
@@ -169,15 +175,17 @@ class CfOptimizerCoordinator(private val context: Context) {
         // 物理网络出口：探测 / 上传 Java 侧网络 I/O 统一绑它。
         // 不绑的后果（真机实测）：开着代理时请求回流进本应用 TUN → 被自己的规则送进代理
         // 节点 → 上传失败/超时，而关掉代理就一切正常。
-        // 唯一例外 = 拉源（2026-10-01 R1 修复）：直连拉不动 GitHub/pages.dev 等 SNI 封锁源
-        // 时 CfCandidateSource 有界回落默认路由（开代理时由代理代拉文本源）—— 拉源只是文本
-        // 下载，不涉及探测真实性；探测/上传不受影响。
+        // 所有阶段必须绑定同一个真实物理网络。没有可用物理网络时直接结束，
+        // 绝不能回退系统默认路由（默认路由可能就是本应用自己的 VPN/TUN）。
         val physicalNetwork = PhysicalNetwork.pick(context)
+            ?: run {
+                CfLog.w("run=$runId abort reason=no_physical_network")
+                return Result(0, 0, false, "no_physical_network", false, null)
+            }
 
-        CfLog.i("run=$runId net physical=${if (physicalNetwork == null) "none(default)" else "bound"}")
+        CfLog.i("run=$runId net physical=bound")
 
         // 1. 源发现（导航站 → 缓存 → 内置兜底）+ 拉取候选。
-        val state = StateStore(context)
         state.saveRunState(STAGE_SOURCES, 0, 0)
         onProgress(STAGE_SOURCES, 0, 0)
 
@@ -191,13 +199,23 @@ class CfOptimizerCoordinator(private val context: Context) {
             state.saveSourceUrls(discovered)
         }
 
-        val sources = CfCandidateSource.BUILTIN_SOURCE_URLS +
-                (discovered.ifEmpty { state.cachedSourceUrls() }).shuffled()
-                    .take(sourcesPerRun.coerceIn(1, CfOptimizerTuning.SOURCES_PER_RUN_MAX))
+        val sourceLimit = sourcesPerRun.coerceIn(1, CfOptimizerTuning.SOURCES_PER_RUN_MAX)
+        val sourcePool = (discovered.ifEmpty { state.cachedSourceUrls() })
+            .distinct()
+            .mapNotNull(CfCandidateSource::normalizeSourceUrl)
+            .let { sources ->
+                if (sources.isNotEmpty()) {
+                    sources
+                } else {
+                    CfCandidateSource.BUILTIN_SOURCE_URLS.distinct()
+                }
+            }
+            .shuffled()
+        val sources = sourcePool.take(sourceLimit)
 
         CfLog.i(
-            "run=$runId sources total=${sources.size} discovered=${discovered.size} " +
-                "cacheFallback=${discovered.isEmpty()}",
+            "run=$runId sources total=${sources.size}/$sourceLimit discovered=${discovered.size} " +
+                "cacheFallback=${discovered.isEmpty()} builtinFallback=${sourcePool.isEmpty()}",
         )
 
         val candidates = try {
@@ -255,7 +273,7 @@ class CfOptimizerCoordinator(private val context: Context) {
             return Result(0, 0, false, "no_candidates", false, null)
         }
 
-        val probe = CfProbe(context, probeConfig)
+        val probe = CfProbe(context, probeConfig, physicalNetwork)
 
         // 1.7 TCP 连通预筛（漏斗第一段）：死 IP 在这里以"1 次 connect × 1s"的代价淘汰，
         //     只有存活集进昂贵的 TTFB/trace 段。保序 —— 记忆池在最前，截断时天然优先保留。
@@ -323,7 +341,7 @@ class CfOptimizerCoordinator(private val context: Context) {
 
         // 2.7 下载测速（默认开）：评分公式里带宽占 40%，此前该分量恒为 0 —— 等于只按
         //     延迟选节点。只测 TTFB 最优的窄池（原脚本 TTFB_POOL_LIMIT 语义），
-        //     控制手机流量；测速失败的候选保留 TTFB 分量（不编造带宽、不丢节点）。
+        //     控制手机流量；测速失败的候选不伪造带宽，也不混入本轮带宽排名。
         val downloads = if (downloadTestEnabled && probed.isNotEmpty()) {
             val pool = probed
                 .mapNotNull { candidate -> metrics[candidate]?.let { candidate to it.ttfbMs } }
@@ -436,7 +454,7 @@ class CfOptimizerCoordinator(private val context: Context) {
         // 5. 上传 Worker（整体覆写语义：只在本轮有达标结果时才覆盖）。
         val client = CfWorkerClient(
             CfWorkerSettings(baseUrl, password),
-            UrlConnectionWorkerHttpTransport(context),
+            UrlConnectionWorkerHttpTransport { physicalNetwork },
         )
         val uploadStartedAt = System.currentTimeMillis()
         val uploadResult = client.upload(entries)
@@ -485,6 +503,10 @@ class CfOptimizerCoordinator(private val context: Context) {
                     )
                 }
             }
+        }
+
+        if (profileUpdated) {
+            state.saveProfileRefreshSuccess()
         }
 
         CfLog.i(
@@ -612,8 +634,19 @@ class CfOptimizerCoordinator(private val context: Context) {
  * 内容只有 IP 行与结果摘要，无凭据；随应用默认备份策略即可。
  */
 class StateStore(context: Context) {
+    // The settings provider is the only supported cross-process preference bridge in this app.
+    // A normal SharedPreferences instance is process-local and made the UI show stale stages.
     private val preferences =
-        context.getSharedPreferences(STATE_FILE, Context.MODE_PRIVATE)
+        PreferenceProvider.createSharedPreferencesFromContext(context)
+    private val legacyPreferences =
+        context.applicationContext.getSharedPreferences(LEGACY_STATE_FILE, Context.MODE_PRIVATE)
+
+    fun saveAttemptStarted(runId: String) {
+        preferences.edit()
+            .putLong(KEY_LAST_ATTEMPT_AT, System.currentTimeMillis())
+            .putString(KEY_ACTIVE_RUN_ID, runId)
+            .apply()
+    }
 
     fun saveLastKnownGood(entries: List<String>) {
         preferences.edit()
@@ -622,8 +655,15 @@ class StateStore(context: Context) {
             .apply()
     }
 
+    fun saveProfileRefreshSuccess() {
+        preferences.edit()
+            .putLong(KEY_LAST_PROFILE_REFRESH_AT, System.currentTimeMillis())
+            .apply()
+    }
+
     fun lastKnownGood(): List<String> =
-        preferences.getString(KEY_LAST_KNOWN_GOOD, null)
+        (preferences.getString(KEY_LAST_KNOWN_GOOD, null)
+            ?: legacyPreferences.getString(LEGACY_LAST_KNOWN_GOOD, null))
             ?.split('\n')
             ?.filter { it.isNotBlank() }
             ?: emptyList()
@@ -636,7 +676,8 @@ class StateStore(context: Context) {
     }
 
     fun cachedSourceUrls(): List<String> =
-        preferences.getString(KEY_SOURCE_URLS, null)
+        (preferences.getString(KEY_SOURCE_URLS, null)
+            ?: legacyPreferences.getString(LEGACY_SOURCE_URLS, null))
             ?.split('\n')
             ?.filter { it.isNotBlank() }
             ?: emptyList()
@@ -653,21 +694,59 @@ class StateStore(context: Context) {
             .apply()
     }
 
-    fun runStage(): String = preferences.getString(KEY_RUN_STAGE, "") ?: ""
-    fun runProgress(): Int = preferences.getInt(KEY_RUN_PROGRESS, 0)
-    fun runTotal(): Int = preferences.getInt(KEY_RUN_TOTAL, 0)
-    fun runUpdatedAt(): Long = preferences.getLong(KEY_RUN_UPDATED_AT, 0L)
+    fun runStage(): String =
+        preferences.getString(KEY_RUN_STAGE, null)
+            ?: legacyPreferences.getString(LEGACY_RUN_STAGE, "")
+            ?: ""
 
-    fun lastSuccessAt(): Long = preferences.getLong(KEY_LAST_SUCCESS_AT, 0L)
+    fun runProgress(): Int =
+        if (preferences.contains(KEY_RUN_PROGRESS)) {
+            preferences.getInt(KEY_RUN_PROGRESS, 0)
+        } else {
+            legacyPreferences.getInt(LEGACY_RUN_PROGRESS, 0)
+        }
+
+    fun runTotal(): Int =
+        if (preferences.contains(KEY_RUN_TOTAL)) {
+            preferences.getInt(KEY_RUN_TOTAL, 0)
+        } else {
+            legacyPreferences.getInt(LEGACY_RUN_TOTAL, 0)
+        }
+
+    fun runUpdatedAt(): Long =
+        if (preferences.contains(KEY_RUN_UPDATED_AT)) {
+            preferences.getLong(KEY_RUN_UPDATED_AT, 0L)
+        } else {
+            legacyPreferences.getLong(LEGACY_RUN_UPDATED_AT, 0L)
+        }
+
+    fun lastAttemptAt(): Long = preferences.getLong(KEY_LAST_ATTEMPT_AT, 0L)
+    fun lastSuccessAt(): Long =
+        if (preferences.contains(KEY_LAST_SUCCESS_AT)) {
+            preferences.getLong(KEY_LAST_SUCCESS_AT, 0L)
+        } else {
+            legacyPreferences.getLong(LEGACY_LAST_SUCCESS_AT, 0L)
+        }
+    fun lastProfileRefreshAt(): Long = preferences.getLong(KEY_LAST_PROFILE_REFRESH_AT, 0L)
 
     companion object {
-        private const val STATE_FILE = "cfoptimizer_state"
-        private const val KEY_LAST_KNOWN_GOOD = "last_known_good"
-        private const val KEY_LAST_SUCCESS_AT = "last_success_at"
-        private const val KEY_SOURCE_URLS = "source_urls"
-        private const val KEY_RUN_STAGE = "run_stage"
-        private const val KEY_RUN_PROGRESS = "run_progress"
-        private const val KEY_RUN_TOTAL = "run_total"
-        private const val KEY_RUN_UPDATED_AT = "run_updated_at"
+        private const val LEGACY_STATE_FILE = "cfoptimizer_state"
+        private const val LEGACY_LAST_KNOWN_GOOD = "last_known_good"
+        private const val LEGACY_LAST_SUCCESS_AT = "last_success_at"
+        private const val LEGACY_SOURCE_URLS = "source_urls"
+        private const val LEGACY_RUN_STAGE = "run_stage"
+        private const val LEGACY_RUN_PROGRESS = "run_progress"
+        private const val LEGACY_RUN_TOTAL = "run_total"
+        private const val LEGACY_RUN_UPDATED_AT = "run_updated_at"
+        private const val KEY_ACTIVE_RUN_ID = "cfoptimizer_active_run_id"
+        private const val KEY_LAST_ATTEMPT_AT = "cfoptimizer_last_attempt_at"
+        private const val KEY_LAST_KNOWN_GOOD = "cfoptimizer_last_known_good"
+        private const val KEY_LAST_SUCCESS_AT = "cfoptimizer_last_success_at"
+        private const val KEY_LAST_PROFILE_REFRESH_AT = "cfoptimizer_last_profile_refresh_at"
+        private const val KEY_SOURCE_URLS = "cfoptimizer_source_urls"
+        private const val KEY_RUN_STAGE = "cfoptimizer_run_stage"
+        private const val KEY_RUN_PROGRESS = "cfoptimizer_run_progress"
+        private const val KEY_RUN_TOTAL = "cfoptimizer_run_total"
+        private const val KEY_RUN_UPDATED_AT = "cfoptimizer_run_updated_at"
     }
 }

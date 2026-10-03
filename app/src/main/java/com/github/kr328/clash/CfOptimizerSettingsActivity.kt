@@ -3,7 +3,6 @@ package com.github.kr328.clash
 import android.content.Intent
 import com.github.kr328.clash.design.CfOptimizerSettingsDesign
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerIntents
-import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsStore
 import com.github.kr328.clash.service.cfoptimizer.settings.KeystoreCfOptimizerSecretStore
 import com.github.kr328.clash.service.model.Profile
 import com.github.kr328.clash.util.withProfile
@@ -45,9 +44,8 @@ class CfOptimizerSettingsActivity : BaseActivity<CfOptimizerSettingsDesign>() {
                             )
                         }
                         CfOptimizerSettingsDesign.Request.RunCfOptimizer -> {
-                            CfOptimizerSettingsStore(this@CfOptimizerSettingsActivity).lastRunAt =
-                                System.currentTimeMillis()
-
+                            // The service records the attempt after it actually starts;
+                            // a failed validation must not consume the auto-heal cooldown.
                             // Package-limited in-app broadcast; the receiver belongs
                             // to the service module. Never exported.
                             sendBroadcast(

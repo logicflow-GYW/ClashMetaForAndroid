@@ -32,7 +32,11 @@ import javax.net.ssl.SSLSocket
  * TLS 用系统默认 trust manager + SNI `cp.cloudflare.com`，证书校验完整——
  * 不照搬 Python 脚本的 `ssl=False`。
  */
-class CfProbe(private val context: Context, private val config: CfProbeConfig = CfProbeConfig()) {
+class CfProbe(
+    private val context: Context,
+    private val config: CfProbeConfig = CfProbeConfig(),
+    private val boundNetwork: Network? = null,
+) {
     /** HTTP 探测目标 host（SNI/Host 头）。 */
     private val probeHost: String = PROBE_HOST
 
@@ -421,7 +425,7 @@ class CfProbe(private val context: Context, private val config: CfProbeConfig = 
      * 主物理网络（探测 / 源拉取 / Worker 上传统一使用同一条）。
      * 实现委托 [PhysicalNetwork]：排除 VPN、Wi‑Fi 优先、蜂窝次之。
      */
-    fun primaryNetwork(): Network? = PhysicalNetwork.pick(context)
+    fun primaryNetwork(): Network? = boundNetwork ?: PhysicalNetwork.pick(context)
 
     /** 候选探测用网络（保留给协调器做网络标签；语义同 [PhysicalNetwork.candidates]）。 */
     fun candidateNetworks(): List<Network> = PhysicalNetwork.candidates(context)

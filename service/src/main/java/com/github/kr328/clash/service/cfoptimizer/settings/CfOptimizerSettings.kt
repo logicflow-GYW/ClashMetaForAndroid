@@ -22,7 +22,6 @@ data class CfOptimizerSettings(
     val confirmedSharedListOwnership: Boolean,
     val customEntries: List<String>,
     val autoHealEnabled: Boolean,
-    val lastRunAt: Long,
 )
 
 /**
@@ -66,11 +65,6 @@ class CfOptimizerSettingsStore(context: Context) {
     var autoHealEnabled: Boolean by store.boolean(
         key = "cfoptimizer_auto_heal_enabled",
         defaultValue = false,
-    )
-
-    var lastRunAt: Long by store.long(
-        key = "cfoptimizer_last_run_at",
-        defaultValue = 0L,
     )
 
     // ── 运行参数（模仿原版 cf_config.py，全部带默认值；空/非法时回落默认）──

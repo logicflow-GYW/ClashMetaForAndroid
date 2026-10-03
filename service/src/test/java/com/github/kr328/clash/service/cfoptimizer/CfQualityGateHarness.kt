@@ -22,7 +22,7 @@ private fun check(name: String, pass: Boolean, detail: String = "") {
     }
 }
 
-private fun main() {
+fun runCfQualityGateHarness() {
     // 固定"现在"（epoch ms，写死不从时钟取）
     val now = 1_790_663_400_000L
     val hour = 3_600_000L
