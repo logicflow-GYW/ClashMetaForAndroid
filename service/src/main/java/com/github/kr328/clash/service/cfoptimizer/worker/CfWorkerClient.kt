@@ -159,6 +159,9 @@ class CfWorkerClient(
         when (parseSuccess(response.body)) {
             true -> return WorkerUploadResult.Success
             false -> return WorkerUploadResult.Failure(WorkerFailureReason.UploadRejected)
+            // Not JSON (HTML error page, plain text, empty): falls through to the
+            // content-type check below, which only accepts a non-empty text/plain ack.
+            null -> { /* fall through */ }
         }
 
         val contentType = response.headerValues("Content-Type")
