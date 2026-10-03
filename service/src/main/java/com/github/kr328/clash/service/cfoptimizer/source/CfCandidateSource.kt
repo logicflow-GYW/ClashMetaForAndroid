@@ -5,6 +5,13 @@ import com.github.kr328.clash.service.cfoptimizer.CandidateIp
 import com.github.kr328.clash.service.cfoptimizer.CfLog
 import com.github.kr328.clash.service.cfoptimizer.CfOptimizerEngine
 import com.github.kr328.clash.service.cfoptimizer.net.PhysicalNetwork
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.InetAddress
@@ -95,48 +102,82 @@ object CfCandidateSource {
         setOf(80, 8080, 8880, 2052, 2082, 2086, 2095, 443, 2053, 2083, 2087, 2096, 8443)
 
     /**
-     * 拉取候选。返回打乱后截断的候选列表；完全失败抛最后一个 [IOException]，由调用方决定终止路径。
+     * 单轮源拉取并发上限。源是公网静态文本（单源字节上限 [MAX_SOURCE_BYTES]），有界并发把
+     * 「部分源直连超时」的墙钟从串行累加（12 源 × 最坏 ~15s ≈ 180s，真机 10-03 实测 sources
+     * 段 164-207s）压到约 1/4。不引入默认路由回落 —— 并发改变的是墙钟，不改变
+     * 「源流量只走物理直连」的语义。刻意不做用户可调项：源数 ≤24、每源超时已封顶，
+     * 并发度只影响墙钟不影响结果，为它加设置项（UI/存储/语言文件）不划算。
+     */
+    private const val SOURCE_CONCURRENCY: Int = 4
+
+    /** 单源拉取结果（有界并发收集，完成后按源顺序合并 —— 与串行版相同的去重优先级与日志）。 */
+    private class SourceFetchResult(
+        val url: String,
+        val lines: List<String>?,
+        val error: IOException?,
+        val elapsedMs: Long,
+    )
+
+    /**
+     * 拉取候选。有界并发（[SOURCE_CONCURRENCY]）拉取全部源，完成后按源顺序合并 ——
+     * 返回打乱后截断的候选列表；完全失败抛最后一个 [IOException]，由调用方决定终止路径。
      *
      * [excludedRegions]：黑名单地区（用户设置，默认 RU,KP,CN,HK）；[perSourceSample] /
      * [maxCandidates]：用户设置的有界参数。
      */
-    fun fetchFrom(
+    suspend fun fetchFrom(
         sources: List<String>,
         excludedRegions: Set<String> = EXCLUDED_SOURCE_REGIONS,
         perSourceSample: Int = PER_SOURCE_SAMPLE,
         maxCandidates: Int = MAX_CANDIDATES,
         network: Network,
-    ): List<CandidateIp> {
-        val rnd = Random(System.nanoTime())
-
+    ): List<CandidateIp> = withContext(Dispatchers.IO) {
         val merged = LinkedHashMap<String, CandidateIp>()
         var lastError: IOException? = null
 
         // All source traffic stays on the same validated physical network as probing
         // and upload. A source failure is isolated to that source; it must never cause
         // a silent retry through the app VPN/default route.
-        fun fetchLines(url: String): List<String>? = try {
-            downloadLines(network, url)
-        } catch (e: IOException) {
-            lastError = e
-            CfLog.w("source fetch failed route=physical error=${e.javaClass.simpleName}: ${e.message}")
-            null
+        // 有界并发（[SOURCE_CONCURRENCY]）：单源超时只拖慢自己，不再拖满整轮；
+        // 共享 Random 并发不安全，抽样洗牌在各自协程内用独立 Random 完成（与串行版同语义）。
+        val semaphore = Semaphore(SOURCE_CONCURRENCY)
+        val fetched: List<SourceFetchResult> = coroutineScope {
+            sources.map { url ->
+                async {
+                    semaphore.withPermit {
+                        val startedAtMs = System.currentTimeMillis()
+                        try {
+                            SourceFetchResult(
+                                url,
+                                downloadLines(network, url),
+                                null,
+                                System.currentTimeMillis() - startedAtMs,
+                            )
+                        } catch (e: IOException) {
+                            CfLog.w(
+                                "source fetch failed route=physical error=${e.javaClass.simpleName}: ${e.message}",
+                            )
+                            SourceFetchResult(url, null, e, System.currentTimeMillis() - startedAtMs)
+                        }
+                    }
+                }
+            }.awaitAll()
         }
 
-        for (url in sources) {
-            val startedAtMs = System.currentTimeMillis()
-            val lines = fetchLines(url)
-
-            if (lines == null) {
+        for (fetchResult in fetched) {
+            if (fetchResult.lines == null) {
+                if (fetchResult.error != null) lastError = fetchResult.error
                 CfLog.w(
-                    "source failed url=${shortSourceUrl(url)} " +
-                        "error=${lastError?.javaClass?.simpleName ?: "unknown"}",
+                    "source failed url=${shortSourceUrl(fetchResult.url)} " +
+                        "error=${fetchResult.error?.javaClass?.simpleName ?: "unknown"}",
                 )
                 continue
             }
 
             val parsed = parseCandidates(
-                lines.shuffled(rnd).take(perSourceSample.coerceIn(1, MAX_PER_SOURCE_SAMPLE)),
+                fetchResult.lines
+                    .shuffled(Random(System.nanoTime() xor fetchResult.url.hashCode().toLong()))
+                    .take(perSourceSample.coerceIn(1, MAX_PER_SOURCE_SAMPLE)),
                 excludedRegions,
             )
 
@@ -145,14 +186,14 @@ object CfCandidateSource {
             }
 
             CfLog.i(
-                "source ok lines=${lines.size} kept=${parsed.size} merged=${merged.size} " +
-                    "elapsed=${System.currentTimeMillis() - startedAtMs}ms url=${shortSourceUrl(url)}",
+                "source ok lines=${fetchResult.lines.size} kept=${parsed.size} merged=${merged.size} " +
+                    "elapsed=${fetchResult.elapsedMs}ms url=${shortSourceUrl(fetchResult.url)}",
             )
         }
 
         // 上限不再写死 1000：那个数会把放大后的池子悄悄砍掉一半。
         // 用引擎侧的两层配额上限（RAW_POOL_CEILING），保证"用户设的池子"真的按用户设的来。
-        val result = merged.values.shuffled(rnd)
+        val result = merged.values.shuffled(Random(System.nanoTime()))
             .take(maxCandidates.coerceIn(1, CfOptimizerEngine.RAW_POOL_CEILING))
 
         CfLog.i(
@@ -162,7 +203,7 @@ object CfCandidateSource {
 
         if (result.isEmpty() && lastError != null) throw lastError
 
-        return result
+        result
     }
 
     /**
