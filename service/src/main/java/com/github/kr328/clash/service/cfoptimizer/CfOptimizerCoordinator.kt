@@ -18,6 +18,7 @@ import com.github.kr328.clash.service.cfoptimizer.worker.CfWorkerClient
 import com.github.kr328.clash.service.cfoptimizer.worker.CfWorkerSettings
 import com.github.kr328.clash.service.cfoptimizer.worker.UrlConnectionWorkerHttpTransport
 import com.github.kr328.clash.service.cfoptimizer.worker.WorkerUploadResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -226,6 +227,9 @@ class CfOptimizerCoordinator(private val context: Context) {
                 maxCandidates = rawPoolLimit,
                 network = physicalNetwork,
             )
+        } catch (e: CancellationException) {
+            // 拉源现在是并发协程：取消必须原样穿出（终止路径），不能被当成拉源失败吞掉。
+            throw e
         } catch (e: Exception) {
             CfLog.e("run=$runId abort reason=candidates_${e.javaClass.simpleName}: ${e.message}", e)
             return Result(0, 0, false, "candidates_${e.javaClass.simpleName}", false, null)
@@ -458,6 +462,12 @@ class CfOptimizerCoordinator(private val context: Context) {
         )
         val uploadStartedAt = System.currentTimeMillis()
         val uploadResult = client.upload(entries)
+
+        // 上传段耗时进 runs.jsonl（此前 upload 不在 stage_s，缺口无法归因到上传）；
+        // 放在早退分支之前：上传失败的轮次同样要带时间退出 —— recorder.stageSeconds
+        // 在质量门前已快照过，这里刷新才是最终值。
+        markStage(STAGE_UPLOAD)
+        recorder.stageSeconds = stageSeconds.toMap()
 
         val uploaded = uploadResult is WorkerUploadResult.Success
         val uploadReason = (uploadResult as? WorkerUploadResult.Failure)?.reason?.name
