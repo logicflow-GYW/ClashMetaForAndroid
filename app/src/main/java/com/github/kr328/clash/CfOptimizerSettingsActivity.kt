@@ -3,6 +3,7 @@ package com.github.kr328.clash
 import android.content.Intent
 import com.github.kr328.clash.design.CfOptimizerSettingsDesign
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerIntents
+import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsStore
 import com.github.kr328.clash.service.cfoptimizer.settings.KeystoreCfOptimizerSecretStore
 import com.github.kr328.clash.service.model.Profile
 import com.github.kr328.clash.util.withProfile

@@ -4,6 +4,7 @@ import android.content.Intent
 import com.github.kr328.clash.common.util.intent
 import com.github.kr328.clash.design.NetworkSettingsDesign
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerIntents
+import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsStore
 import com.github.kr328.clash.service.cfoptimizer.settings.KeystoreCfOptimizerSecretStore
 import com.github.kr328.clash.service.model.Profile
 import com.github.kr328.clash.service.store.ServiceStore
