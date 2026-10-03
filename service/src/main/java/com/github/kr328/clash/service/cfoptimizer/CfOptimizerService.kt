@@ -12,9 +12,11 @@ import com.github.kr328.clash.common.compat.startForegroundServiceCompat
 import com.github.kr328.clash.common.id.UndefinedIds
 import com.github.kr328.clash.service.BaseService
 import com.github.kr328.clash.service.R
+import com.github.kr328.clash.service.cfoptimizer.memory.CfMemoryStore
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerIntents
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
@@ -28,6 +30,17 @@ import java.util.concurrent.TimeUnit
 class CfOptimizerService : BaseService() {
     private val service: CfOptimizerService
         get() = this
+
+    // onStartCommand is serialized on the main thread, but the job finishes on a
+    // coroutine dispatcher. Keep the lock file cross-instance; it survives service
+    // recreation while a run is still in flight.
+    private val runLockFile: File by lazy {
+        val lockDir = File(filesDir, CfMemoryStore.DIR_NAME)
+        if (!lockDir.exists()) {
+            lockDir.mkdirs()
+        }
+        File(lockDir, "optimization.lock")
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -50,18 +63,45 @@ class CfOptimizerService : BaseService() {
         super.onStartCommand(intent, flags, startId)
 
         if (intent?.action == CfOptimizerIntents.ACTION_RUN_NOW) {
+            if (!tryLockRun()) {
+                CfLog.w("service: run ignored because another run is in progress")
+                return START_NOT_STICKY
+            }
+
             CfLog.i("service: run requested (manual/auto-heal)")
 
             launch {
-                runOptimization()
-                delay(TimeUnit.SECONDS.toMillis(2))
-                stopSelf()
+                try {
+                    runOptimization()
+                    delay(TimeUnit.SECONDS.toMillis(2))
+                } finally {
+                    unlockRun()
+                    stopSelf()
+                }
             }
         } else {
             stopSelf()
         }
 
         return START_NOT_STICKY
+    }
+
+    private fun tryLockRun(): Boolean {
+        return try {
+            runLockFile.createNewFile()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun unlockRun() {
+        try {
+            if (runLockFile.exists()) {
+                runLockFile.delete()
+            }
+        } catch (e: Exception) {
+            CfLog.w("service: could not remove run lock: ${e.javaClass.simpleName}: ${e.message}")
+        }
     }
 
     private suspend fun runOptimization() {

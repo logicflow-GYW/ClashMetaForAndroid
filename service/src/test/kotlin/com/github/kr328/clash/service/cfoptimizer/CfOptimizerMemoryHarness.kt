@@ -123,7 +123,7 @@ private fun replay(): LinkedHashMap<String, MemoryRecord> {
     return db
 }
 
-fun main() {
+fun runCfOptimizerMemoryHarness() {
     val db = replay()
 
     // ---- 1. 记录字段（期望值 = 原版 cf_memory.py 在同一夹具下的实测输出）----

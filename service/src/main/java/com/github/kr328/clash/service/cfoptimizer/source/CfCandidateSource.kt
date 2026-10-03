@@ -8,6 +8,7 @@ import com.github.kr328.clash.service.cfoptimizer.net.PhysicalNetwork
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.InetAddress
+import java.net.URI
 import java.net.URL
 import kotlin.random.Random
 
@@ -84,9 +85,10 @@ object CfCandidateSource {
      */
     const val MAX_CANDIDATES: Int = 300
 
-    /** 连接/读取超时（毫秒）。公网静态文本源；直连失败的有界回落见 [fetchFrom]，不做无界重试。 */
+    /** 连接/读取超时（毫秒）。公网静态文本源；单源失败不拖垮整轮。 */
     private const val CONNECT_TIMEOUT_MS: Int = 5_000
     private const val READ_TIMEOUT_MS: Int = 10_000
+    private const val MAX_REDIRECTS: Int = 3
 
     /** Cloudflare 支持的入口端口（与引擎白名单一致，双保险）。 */
     private val ALLOWED_PORTS: Set<Int> =
@@ -103,41 +105,22 @@ object CfCandidateSource {
         excludedRegions: Set<String> = EXCLUDED_SOURCE_REGIONS,
         perSourceSample: Int = PER_SOURCE_SAMPLE,
         maxCandidates: Int = MAX_CANDIDATES,
-        network: Network? = null,
+        network: Network,
     ): List<CandidateIp> {
         val rnd = Random(System.nanoTime())
 
         val merged = LinkedHashMap<String, CandidateIp>()
         var lastError: IOException? = null
 
-        // 直连回落（R1，2026-10-01 诊断）：CN 蜂窝直连 GitHub/pages.dev 等 SNI 封锁源会
-        // 超时/复位，原始池因此塌缩（真机 7 轮实测 211-442 条；默认参数 15 源 × 1000/源，
-        // 光 zip.cm 一家就有 14875 行）。主网络拉取失败时回落系统默认路由（null = 开代理时
-        // 回流进本应用 TUN，由代理代拉）—— 拉源只是文本下载，不涉及探测真实性；探测 /
-        // 上传仍固定走物理网络（见 Coordinator 绑定注释）。
-        // ponytail: 每源至多一次回落、不跨轮记忆网络健康 | 天花板: 默认路由也不通时每源付双倍超时 | 升级触发: sources 段时长膨胀且 candidates_raw 仍低
-        var useDefaultRouting = false
-
-        // 单源失败不拖垮整轮（原版 fetch_urls_classified 同语义），记录最后一个错误；
-        // 直连失败回落默认路由再试一次（有界：不叠第二次）。粘性：默认路由验证成功后，
-        // 剩余源不再重复付直连超时的价钱。
+        // All source traffic stays on the same validated physical network as probing
+        // and upload. A source failure is isolated to that source; it must never cause
+        // a silent retry through the app VPN/default route.
         fun fetchLines(url: String): List<String>? = try {
-            downloadLines(if (useDefaultRouting) null else network, url)
+            downloadLines(network, url)
         } catch (e: IOException) {
             lastError = e
-            if (useDefaultRouting || network == null) {
-                CfLog.w("source fetch failed route=default error=${e.javaClass.simpleName}: ${e.message}")
-                null
-            } else {
-                CfLog.w("source fetch failed route=physical error=${e.javaClass.simpleName}, retry via default routing")
-                try {
-                    downloadLines(null, url).also { useDefaultRouting = true }
-                } catch (e2: IOException) {
-                    lastError = e2
-                    CfLog.w("source fallback retry also failed: ${e2.javaClass.simpleName}: ${e2.message}")
-                    null
-                }
-            }
+            CfLog.w("source fetch failed route=physical error=${e.javaClass.simpleName}: ${e.message}")
+            null
         }
 
         for (url in sources) {
@@ -184,28 +167,35 @@ object CfCandidateSource {
 
     /**
      * 源发现：抓取导航站并提取 .txt IP 源链接。失败抛 [IOException]（调用方走缓存/内置兜底）。
-     * 直连拉不动时有界回落系统默认路由（拉源只是文本下载；语义同 [fetchFrom] 的回落）。
+     * 请求必须绑定已经验证的物理网络，不回退系统默认路由。
      */
-    fun discoverSourceUrls(network: Network? = null): List<String> = try {
+    fun discoverSourceUrls(network: Network): List<String> =
         scrapeNavigationSite(network)
-    } catch (e: IOException) {
-        if (network == null) throw e
-        CfLog.w("source discovery failed route=physical error=${e.javaClass.simpleName}, retry via default routing")
-        scrapeNavigationSite(null)
-    }
 
     /** 抓取导航站并提取 .txt IP 源链接（原版 scrape `<span class="url-text">` 语义）。 */
-    private fun scrapeNavigationSite(network: Network?): List<String> {
+    private fun scrapeNavigationSite(network: Network): List<String> {
         val html = downloadText(network, NAVIGATION_URL, MAX_SOURCE_BYTES)
 
         val regex = Regex("""<span class="url-text">(.*?)</span>""")
 
         return regex.findAll(html)
             .map { it.groupValues[1].trim() }
-            .map { if (it.startsWith("http")) it else "https://$it" }
-            .filter { it.endsWith(".txt") && !it.contains("sub://") && !it.contains("/CIDR/") }
+            .mapNotNull(::normalizeSourceUrl)
             .distinct()
             .toList()
+    }
+
+    /** 只接受 HTTPS 的纯文本源；禁止用户信息、fragment 和非文本路径。 */
+    fun normalizeSourceUrl(raw: String): String? {
+        if (raw.contains("sub://", ignoreCase = true) || raw.contains("/CIDR/", ignoreCase = true)) {
+            return null
+        }
+
+        val uri = runCatching { URI(raw) }.getOrNull() ?: return null
+        if (uri.scheme?.equals("https", ignoreCase = true) != true) return null
+        if (uri.host.isNullOrBlank() || !uri.userInfo.isNullOrEmpty() || uri.fragment != null) return null
+        if (!uri.path.orEmpty().endsWith(".txt", ignoreCase = true)) return null
+        return uri.toString()
     }
 
     /** 源 URL 的日志形态：去掉 query（防个别源把 token 放 query 里被写进日志）。 */
@@ -224,45 +214,74 @@ object CfCandidateSource {
             .toList()
 
     /** 下载并按行返回（10s 读超时；字节截断兜底）。失败抛 [IOException]。 */
-    private fun downloadLines(network: Network?, url: String): List<String> =
+    private fun downloadLines(network: Network, url: String): List<String> =
         downloadText(network, url, MAX_SOURCE_BYTES).lineSequence().filter { it.isNotBlank() }.toList()
 
     /**
-     * 下载文本源。连接默认走 [network] 绑定的网络（null = 系统默认路由）：开着代理时裸
-     * `URL.openConnection()` 会回流进本应用 TUN，被自己的规则送进代理节点，
-     * 表现为「关代理顺利、开代理拉源失败」。
-     *
-     * 直连回落由调用方做（[fetchFrom] / [discoverSourceUrls]）—— 本函数保持单路径纯下载。
+     * 下载文本源。连接始终绑定 [network]，不会回流进本应用 TUN，也不会静默走默认路由。
      */
-    private fun downloadText(network: Network?, url: String, maxBytes: Int): String {
-        val connection = PhysicalNetwork.openConnection(network, URL(url)) as HttpURLConnection
+    private fun downloadText(network: Network, url: String, maxBytes: Int): String {
+        val initial = runCatching { URI(url) }
+            .getOrElse { throw IOException("source URL malformed: ${shortSourceUrl(url)}") }
+        var current = URL(url)
+        var redirects = 0
 
-        connection.connectTimeout = CONNECT_TIMEOUT_MS
-        connection.readTimeout = READ_TIMEOUT_MS
-        connection.instanceFollowRedirects = false
+        while (true) {
+            val connection = PhysicalNetwork.openConnection(network, current) as HttpURLConnection
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
+            connection.instanceFollowRedirects = false
 
-        try {
-            if (connection.responseCode !in 200..299) {
-                // 异常消息会被上游原样带进日志（fetchLines catch 的 route=default 行、
-                // Coordinator 的 candidates_* abort 行），所以这里就去 query——与
-                // shortSourceUrl 同一契约：个别源把 token 放 query，不能经异常消息落 logcat。
-                throw IOException("source HTTP ${connection.responseCode}: ${shortSourceUrl(url)}")
+            try {
+                val status = connection.responseCode
+                if (status in 200..299) {
+                    val buffer = ByteArray(maxBytes)
+                    var offset = 0
+                    connection.inputStream.use { stream ->
+                        while (offset < buffer.size) {
+                            val read = stream.read(buffer, offset, buffer.size - offset)
+                            if (read < 0) break
+                            offset += read
+                        }
+                    }
+                    return String(buffer, 0, offset, Charsets.UTF_8)
+                }
+
+                if (status !in 300..399) {
+                    // Error messages may reach logcat, so never include query tokens.
+                    throw IOException("source HTTP $status: ${shortSourceUrl(current.toString())}")
+                }
+
+                if (redirects++ >= MAX_REDIRECTS) {
+                    throw IOException("source redirect limit exceeded: ${shortSourceUrl(url)}")
+                }
+
+                val location = connection.getHeaderField("Location")
+                    ?: throw IOException("source redirect missing location: ${shortSourceUrl(url)}")
+                val next = URL(current, location)
+                val nextUri = runCatching { URI(next.toString()) }.getOrNull()
+                    ?: throw IOException("source redirect malformed: ${shortSourceUrl(url)}")
+                if (!nextUri.scheme.equals("https", ignoreCase = true) ||
+                    nextUri.host.isNullOrBlank() ||
+                    nextUri.userInfo != null ||
+                    nextUri.fragment != null ||
+                    !sameHttpsOrigin(initial, nextUri)
+                ) {
+                    throw IOException("source redirect crossed origin: ${shortSourceUrl(url)}")
+                }
+                current = next
+            } finally {
+                connection.disconnect()
             }
-
-            val stream = connection.inputStream
-            val buffer = ByteArray(maxBytes)
-            var offset = 0
-
-            while (offset < buffer.size) {
-                val read = stream.read(buffer, offset, buffer.size - offset)
-                if (read < 0) break
-                offset += read
-            }
-
-            return String(buffer, 0, offset, Charsets.UTF_8)
-        } finally {
-            connection.disconnect()
         }
+    }
+
+    private fun sameHttpsOrigin(first: URI, second: URI): Boolean {
+        if (!first.scheme.equals("https", ignoreCase = true) ||
+            !second.scheme.equals("https", ignoreCase = true)
+        ) return false
+        fun port(uri: URI): Int = if (uri.port == -1) 443 else uri.port
+        return first.host.equals(second.host, ignoreCase = true) && port(first) == port(second)
     }
 
     /** 行格式 `IP:port`（`#` 后缀已由调用方剥离）；拒绝一切非字面 IPv4。 */

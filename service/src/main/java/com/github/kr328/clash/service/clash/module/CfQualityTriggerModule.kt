@@ -4,7 +4,9 @@ import android.app.Service
 import android.content.Intent
 import com.github.kr328.clash.core.Clash
 import com.github.kr328.clash.core.model.ProxySort
+import com.github.kr328.clash.core.model.TunnelState
 import com.github.kr328.clash.service.cfoptimizer.CfLog
+import com.github.kr328.clash.service.cfoptimizer.StateStore
 import com.github.kr328.clash.service.cfoptimizer.quality.CfQualityGate
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerIntents
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsStore
@@ -39,9 +41,14 @@ class CfQualityTriggerModule(service: Service) : Module<Unit>(service) {
             if (settings.workerBaseUrl.isBlank()) return
 
             val delays = collectDelays()
+            val state = StateStore(service)
+            // Keep the old settings timestamp as a one-time compatibility fallback
+            // for installations upgraded from the UI-written field. New attempts are
+            // recorded by the service only after validation succeeds.
+            val lastAttemptAt = maxOf(state.lastAttemptAt(), settings.lastRunAt)
             val verdict = CfQualityGate.shouldRun(
                 delays,
-                settings.lastRunAt,
+                lastAttemptAt,
                 System.currentTimeMillis(),
                 settings.minIntervalHours.toLong(),
             )
@@ -63,12 +70,25 @@ class CfQualityTriggerModule(service: Service) : Module<Unit>(service) {
         }
     }
 
-    /** 收集当前 profile 全部节点的延迟（跨组去重；DIRECT/REJECT 不算样本）。 */
+    /**
+     * 收集实际会参与流量的节点延迟（跨组去重；DIRECT/REJECT 不算样本）。
+     *
+     * Global 模式只有 GLOBAL 组会生效，不能把配置里其它未使用组的坏节点算进来。
+     * Rule/Script 模式下规则内容不在核心查询 API 中暴露，因此所有可见组仍是
+     * 潜在路径，保留全组统计以免漏掉实际会被规则选中的节点。
+     */
     private fun collectDelays(): List<Int> {
+        val mode = Clash.queryTunnelState().mode
+        val groupNames = when (mode) {
+            TunnelState.Mode.Direct -> emptyList()
+            TunnelState.Mode.Global -> listOf("GLOBAL")
+            TunnelState.Mode.Rule, TunnelState.Mode.Script -> Clash.queryGroupNames(false)
+        }
+
         val seen = HashSet<String>()
         val delays = mutableListOf<Int>()
 
-        for (name in Clash.queryGroupNames(false)) {
+        for (name in groupNames) {
             val group = Clash.queryGroup(name, ProxySort.Default)
 
             for (proxy in group.proxies) {

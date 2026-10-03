@@ -149,10 +149,31 @@ class CfWorkerClient(
             )
         )
 
-        return if (response.statusCode == HTTP_OK) {
+        if (response.statusCode !in HTTP_SUCCESS_MIN..HTTP_SUCCESS_MAX) {
+            return WorkerUploadResult.Failure(WorkerFailureReason.UploadRejected)
+        }
+
+        // A 2xx HTML error page is not a successful overwrite. Accept the
+        // deployed protocol's JSON success response, or a non-empty text/plain
+        // acknowledgement; reject JSON {success:false}, empty bodies, and HTML.
+        when (parseSuccess(response.body)) {
+            true -> return WorkerUploadResult.Success
+            false -> return WorkerUploadResult.Failure(WorkerFailureReason.UploadRejected)
+            // Not JSON (HTML error page, plain text, empty): falls through to the
+            // content-type check below, which only accepts a non-empty text/plain ack.
+            null -> { /* fall through */ }
+        }
+
+        val contentType = response.headerValues("Content-Type")
+            .firstOrNull()
+            ?.substringBefore(';')
+            ?.trim()
+            ?.lowercase()
+        val responseBody = response.body?.decodeToString()?.trim()
+        return if (contentType == "text/plain" && !responseBody.isNullOrEmpty()) {
             WorkerUploadResult.Success
         } else {
-            WorkerUploadResult.Failure(WorkerFailureReason.UploadRejected)
+            WorkerUploadResult.Failure(WorkerFailureReason.InvalidResponse)
         }
     }
 
@@ -174,7 +195,6 @@ class CfWorkerClient(
         RuntimeException(reason.name)
 
     companion object {
-        private const val HTTP_OK = 200
         private const val HTTP_SUCCESS_MIN = 200
         private const val HTTP_SUCCESS_MAX = 299
 
@@ -236,8 +256,9 @@ class UrlConnectionWorkerHttpTransport(private val networkProvider: () -> Networ
     override suspend fun execute(request: WorkerHttpRequest): WorkerHttpResponse =
         withContext(Dispatchers.IO) {
             val url = URL(request.url)
+            val network = networkProvider() ?: throw IOException("no validated physical network")
             val connection =
-                (PhysicalNetwork.openConnection(networkProvider(), url) as HttpURLConnection).apply {
+                (PhysicalNetwork.openConnection(network, url) as HttpURLConnection).apply {
                     requestMethod = request.method
                     instanceFollowRedirects = false
                     connectTimeout = TIMEOUT_MILLIS

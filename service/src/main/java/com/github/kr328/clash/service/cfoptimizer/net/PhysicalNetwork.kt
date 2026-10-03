@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.os.Build
 import androidx.core.content.getSystemService
 import java.net.URL
 import java.net.URLConnection
@@ -18,7 +19,7 @@ import java.net.URLConnection
  * 刚写入的优选 IP），出现「关代理一切顺利、开代理上传失败 / 订阅更新失败」。
  *
  * 语义：选择带 INTERNET 能力且**不含 TRANSPORT_VPN** 的网络；Wi‑Fi 优先，其次蜂窝。
- * 一个都选不中时返回 null —— 调用方回退系统默认网络（不做静默丢弃，行为可观测）。
+ * 一个都选不中时返回 null —— 调用方必须明确失败，不得回退系统默认网络。
  */
 object PhysicalNetwork {
     /**
@@ -36,6 +37,9 @@ object PhysicalNetwork {
             .filter { (_, caps) ->
                 caps != null &&
                         caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED) &&
+                        (Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+                                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) &&
                         !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
             }
             .sortedByDescending { (_, caps) ->
@@ -49,16 +53,17 @@ object PhysicalNetwork {
     }
 
     /**
-     * 在物理网络上打开连接；[network] 为空时回退系统默认。
+     * 在指定物理网络上打开连接。
      *
-     * 绑定 Network 的连接其 DNS 解析与路由都固定在该网络，
-     * 因此 VPN 开关不影响结果 —— 这是「关代理顺利、开代理失败」的根治点。
+     * 不提供默认路由回退：默认路由可能是本应用自己的 VPN/TUN，
+     * 一旦回退，优选结果和上传请求就不再代表真实物理网络。
      */
-    fun openConnection(network: Network?, url: URL): URLConnection =
-        network?.openConnection(url) ?: url.openConnection()
+    fun openConnection(network: Network, url: URL): URLConnection =
+        network.openConnection(url)
 
-    /** 便捷重载：自行选择当前主物理网络。 */
+    /** 便捷重载：没有可用物理网络时明确失败，不走默认路由。 */
     fun openConnection(context: Context, url: URL): URLConnection =
-        openConnection(pick(context), url)
+        pick(context)?.let { openConnection(it, url) }
+            ?: throw java.io.IOException("no validated physical network")
 
 }

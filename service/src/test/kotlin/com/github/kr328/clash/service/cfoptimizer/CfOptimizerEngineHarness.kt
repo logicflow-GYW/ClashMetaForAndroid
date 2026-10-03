@@ -15,10 +15,10 @@ import com.github.kr328.clash.service.cfoptimizer.OptimizerLimits
 import com.github.kr328.clash.service.cfoptimizer.OptimizedEntry
 import com.github.kr328.clash.service.cfoptimizer.ProbeMetrics
 
-var failures = 0
-var total = 0
+private var failures = 0
+private var total = 0
 
-fun check(name: String, cond: Boolean) {
+private fun check(name: String, cond: Boolean) {
     total++
     if (!cond) {
         failures++
@@ -26,9 +26,9 @@ fun check(name: String, cond: Boolean) {
     }
 }
 
-fun near(a: Double, b: Double, eps: Double = 1e-6) = kotlin.math.abs(a - b) < eps
+private fun near(a: Double, b: Double, eps: Double = 1e-6) = kotlin.math.abs(a - b) < eps
 
-fun main() {
+fun runCfOptimizerEngineHarness() {
     // ---- 1. 固定分数 ----
     // 默认带宽参考值 50（原脚本 150）：0.6*(1-200/800) + 0.4*min(1,75/50) = 0.45 + 0.4 = 0.85
     check("score ttfb=200 bw=75 = 85.0（默认参考值 50）",

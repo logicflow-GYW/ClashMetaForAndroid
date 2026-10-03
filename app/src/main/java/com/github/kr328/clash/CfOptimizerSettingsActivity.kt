@@ -45,9 +45,8 @@ class CfOptimizerSettingsActivity : BaseActivity<CfOptimizerSettingsDesign>() {
                             )
                         }
                         CfOptimizerSettingsDesign.Request.RunCfOptimizer -> {
-                            CfOptimizerSettingsStore(this@CfOptimizerSettingsActivity).lastRunAt =
-                                System.currentTimeMillis()
-
+                            // The service records the attempt after it actually starts;
+                            // a failed validation must not consume the auto-heal cooldown.
                             // Package-limited in-app broadcast; the receiver belongs
                             // to the service module. Never exported.
                             sendBroadcast(

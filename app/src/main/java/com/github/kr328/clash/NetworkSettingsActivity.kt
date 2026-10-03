@@ -49,9 +49,8 @@ class NetworkSettingsActivity : BaseActivity<NetworkSettingsDesign>() {
                         NetworkSettingsDesign.Request.StartAccessControlList ->
                             startActivity(AccessControlActivity::class.intent)
                         NetworkSettingsDesign.Request.RunCfOptimizer -> {
-                            CfOptimizerSettingsStore(this@NetworkSettingsActivity).lastRunAt =
-                                System.currentTimeMillis()
-
+                            // The service records the attempt after it actually starts;
+                            // a validation failure must not consume the auto-heal cooldown.
                             // Package-limited in-app broadcast; the receiver side belongs
                             // to the integration module. Never exported.
                             sendBroadcast(
