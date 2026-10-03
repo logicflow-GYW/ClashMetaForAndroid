@@ -12,7 +12,7 @@ import com.github.kr328.clash.common.compat.startForegroundServiceCompat
 import com.github.kr328.clash.common.id.UndefinedIds
 import com.github.kr328.clash.service.BaseService
 import com.github.kr328.clash.service.R
-import com.github.kr328.clash.service.cfoptimizer.history.CfOptimizerRunLog
+import com.github.kr328.clash.service.cfoptimizer.memory.CfMemoryStore
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerIntents
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -32,10 +32,10 @@ class CfOptimizerService : BaseService() {
         get() = this
 
     // onStartCommand is serialized on the main thread, but the job finishes on a
-    // coroutine dispatcher. Keep the guard atomic so manual and auto-heal triggers
-    // cannot start two scans in parallel.
+    // coroutine dispatcher. Keep the lock file cross-instance; it survives service
+    // recreation while a run is still in flight.
     private val runLockFile: File by lazy {
-        val lockDir = CfOptimizerRunLog.directory()
+        val lockDir = File(filesDir, CfMemoryStore.DIR_NAME)
         if (!lockDir.exists()) {
             lockDir.mkdirs()
         }

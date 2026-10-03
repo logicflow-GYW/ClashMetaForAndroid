@@ -67,6 +67,14 @@ class CfOptimizerSettingsStore(context: Context) {
         defaultValue = false,
     )
 
+    /** 旧版 UI 写入的运行时间戳（key 不再被新代码写入）。仅作升级安装的一次性兼容回落：
+     *  新尝试时间由 StateStore（cfoptimizer_last_attempt_at）记录，质量门取两者 max。
+     *  ponytail: 只读不写 | 天花板: 所有升级安装都跑过一轮后该字段永远为 0 | 升级触发: 遥测确认老字段无人命中 */
+    var lastRunAt: Long by store.long(
+        key = "cfoptimizer_last_run_at",
+        defaultValue = 0L,
+    )
+
     // ── 运行参数（模仿原版 cf_config.py，全部带默认值；空/非法时回落默认）──
     // Raw String 委托供设置页 UI 绑定；typed 计算属性供协调器消费。
 
@@ -435,6 +443,5 @@ class CfOptimizerSettingsStore(context: Context) {
             confirmedSharedListOwnership = confirmedSharedListOwnership,
             customEntries = customEntries ?: emptyList(),
             autoHealEnabled = autoHealEnabled,
-            lastRunAt = lastRunAt,
         )
 }
