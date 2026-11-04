@@ -6,7 +6,10 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.TypedValue
 import android.view.View
+import android.widget.ScrollView
+import android.widget.TextView
 import androidx.core.content.FileProvider
 import androidx.core.content.getSystemService
 import com.github.kr328.clash.design.databinding.DesignSettingsCfOptimizerBinding
@@ -118,9 +121,8 @@ class CfOptimizerSettingsDesign(
                 }
             }
 
-            // 冗余出口：上一轮上传失败时名单已落盘（上传前快照），这里是用户手里
-            // 的数据出口 —— 「复制」去云端手动粘贴，「重试上传」只补传不重跑探测。
-            // 没有快照（从未失败过/已补传成功）时两行隐藏，不占页面。
+            // 结果框 + 冗余出口：上一轮的名单随时可以查看（框内可选中文本 + 复制全部）；
+            // 有待补传快照时才出现「重试上传」。用户拍板：补传功能保持现状，不再投入。
             val copyEntriesPref = clickable(
                 title = R.string.cf_optimizer_copy_entries,
                 summary = R.string.cf_optimizer_copy_entries_summary,
@@ -257,24 +259,65 @@ class CfOptimizerSettingsDesign(
 
             copyEntriesPref.clicked {
                 launch(Dispatchers.Main) {
-                    val entries = withContext(Dispatchers.IO) { stateStore.pendingUpload() }
+                    // 打开结果框而不是直接写剪贴板：用户先看到测出了什么，再决定复制。
+                    // 数据源优先级：待补传快照（最近一轮、可能没传上去）> 上次成功上传的名单。
+                    val entries = withContext(Dispatchers.IO) {
+                        stateStore.pendingUpload().ifEmpty { stateStore.lastKnownGood() }
+                    }
 
                     if (entries.isEmpty()) {
                         showToast(R.string.cf_optimizer_pending_none, ToastDuration.Long)
                         return@launch
                     }
 
-                    val data = ClipData.newPlainText(
-                        "cf_optimizer_entries",
-                        entries.joinToString("\n"),
-                    )
+                    val at = withContext(Dispatchers.IO) {
+                        if (stateStore.pendingUpload().isNotEmpty()) {
+                            stateStore.pendingUploadAt()
+                        } else {
+                            stateStore.lastSuccessAt()
+                        }
+                    }
+                    val time = if (at > 0) {
+                        SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(at))
+                    } else {
+                        ""
+                    }
 
-                    context.getSystemService<ClipboardManager>()?.setPrimaryClip(data)
+                    val text = TextView(context).apply {
+                        text = entries.joinToString("\n")
+                        setTextIsSelectable(true)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                        val pad = (16 * resources.displayMetrics.density).toInt()
+                        setPadding(pad, pad, pad, pad)
+                    }
+                    val scroll = ScrollView(context).apply { addView(text) }
 
-                    showToast(
-                        context.getString(R.string.cf_optimizer_copy_done, entries.size),
-                        ToastDuration.Long,
-                    )
+                    MaterialAlertDialogBuilder(context)
+                        .setTitle(
+                            context.getString(
+                                R.string.cf_optimizer_pending_summary,
+                                entries.size,
+                                time,
+                            )
+                        )
+                        .setView(scroll)
+                        .setPositiveButton(R.string.cf_optimizer_dialog_copy_all) { _, _ ->
+                            val data = ClipData.newPlainText(
+                                "cf_optimizer_entries",
+                                entries.joinToString("\n"),
+                            )
+
+                            context.getSystemService<ClipboardManager>()?.setPrimaryClip(data)
+
+                            launch(Dispatchers.Main) {
+                                showToast(
+                                    context.getString(R.string.cf_optimizer_copy_done, entries.size),
+                                    ToastDuration.Long,
+                                )
+                            }
+                        }
+                        .setNegativeButton(R.string.cancel) { _, _ -> }
+                        .show()
                 }
             }
 
@@ -402,27 +445,35 @@ class CfOptimizerSettingsDesign(
     }
 
     /**
-     * 刷新「复制优选名单 / 重试上传」两行的可见性与摘要。
-     * 没有待传快照时隐藏两行（用户没失败过，这两行是噪音）；
-     * 有快照时摘要 = 快照时间 + 条数，让用户知道补传的是什么。
+     * 刷新「优选结果 / 重试上传」两行的可见性与摘要。
+     * 「优选结果」：有待补传快照或上次成功名单时显示 —— 用户随时能看到测出的东西
+     * （此前只在失败时可见，上传成功后反而找不到，是真实的可用性缺陷）。
+     * 「重试上传」：只看待补传快照（没有失败就没有可补传的东西）。
      */
     private fun refreshPendingPrefs(
         stateStore: StateStore,
         copyEntriesPref: ClickablePreference,
         retryUploadPref: ClickablePreference,
     ) {
-        val entries = stateStore.pendingUpload()
+        val pending = stateStore.pendingUpload()
+        val lastGood = stateStore.lastKnownGood()
 
-        if (entries.isEmpty()) {
+        if (pending.isEmpty() && lastGood.isEmpty()) {
             copyEntriesPref.view.visibility = View.GONE
             retryUploadPref.view.visibility = View.GONE
             return
         }
 
         copyEntriesPref.view.visibility = View.VISIBLE
-        retryUploadPref.view.visibility = View.VISIBLE
 
-        val at = stateStore.pendingUploadAt()
+        if (pending.isEmpty()) {
+            retryUploadPref.view.visibility = View.GONE
+        } else {
+            retryUploadPref.view.visibility = View.VISIBLE
+        }
+
+        val entries = pending.ifEmpty { lastGood }
+        val at = if (pending.isNotEmpty()) stateStore.pendingUploadAt() else stateStore.lastSuccessAt()
         val time = if (at > 0) SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(at)) else ""
 
         copyEntriesPref.summary = context.getString(R.string.cf_optimizer_pending_summary, entries.size, time)
