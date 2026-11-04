@@ -41,7 +41,7 @@ fun runCfOptimizerUploadResilienceHarness() {
         val result = runBlocking { client.upload(listOf("1.2.3.4:443#US")) }
 
         check(result is WorkerUploadResult.Success) { "M1: expected Success, got $result" }
-        check(fake.pushCalls == 999) { "M1: expected 3 push attempts, got ${fake.pushCalls}" }
+        check(fake.pushCalls == 3) { "M1: expected 3 push attempts, got ${fake.pushCalls}" }
         check(fake.loginCalls == 3) { "M1: expected 3 logins (one per attempt), got ${fake.loginCalls}" }
     }
 
