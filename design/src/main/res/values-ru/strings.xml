@@ -372,16 +372,17 @@
     <string name="cf_optimizer_share_summary">Отправить экспортированные файлы в другое приложение</string>
     <string name="cf_optimizer_share_title">Поделиться данными оптимизации CF</string>
     <string name="cf_optimizer_share_failed">Не удалось поделиться: %1$s</string>
-<string name="cf_optimizer_copy_entries">Копировать список результатов</string>
-    <string name="cf_optimizer_copy_entries_summary">Скопировать ожидающий список в буфер для ручной загрузки</string>
+<string name="cf_optimizer_copy_entries">Просмотр результатов</string>
+    <string name="cf_optimizer_copy_entries_summary">Открыть измеренный список в текстовом поле для просмотра или копирования</string>
     <string name="cf_optimizer_retry_upload">Повторить загрузку</string>
     <string name="cf_optimizer_retry_upload_summary">Отправить только ожидающий список в Worker (без нового зондирования)</string>
-    <string name="cf_optimizer_pending_summary">%1$d зап. · снимок %2$s</string>
-    <string name="cf_optimizer_pending_none">Нет ожидающего списка — ничего не сохранялось</string>
+    <string name="cf_optimizer_pending_summary">%1$d зап. · %2$s</string>
+    <string name="cf_optimizer_pending_none">Результатов пока нет — сначала запустите оптимизатор</string>
     <string name="cf_optimizer_copy_done">Скопировано %1$d зап. — вставьте в облачный редактор</string>
+    <string name="cf_optimizer_dialog_copy_all">Копировать всё</string>
     <string name="cf_optimizer_retry_upload_running">Повторная загрузка…</string>
     <string name="cf_optimizer_retry_upload_ok">Загрузка выполнена — список Worker обновлён</string>
-    <string name="cf_optimizer_retry_upload_failed">Ошибка загрузки: %1$s — доступно ручное резервирование через «Копировать список»</string>
+    <string name="cf_optimizer_retry_upload_failed">Ошибка загрузки: %1$s — скопируйте список через «Просмотр результатов»</string>
 
     <string name="cf_optimizer_params_entry_summary">Фильтрация, квоты и поведение — всё настраивается; пустые значения используют стандартные.</string>
     <string name="cf_optimizer_group_filter">Фильтрация</string>

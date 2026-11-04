@@ -305,16 +305,17 @@
     <string name="cf_optimizer_share_summary">把匯出的檔案發給其他應用（聊天 / 網盤 / 郵件）</string>
     <string name="cf_optimizer_share_title">分享 CF 優選資料</string>
     <string name="cf_optimizer_share_failed">分享失敗：%1$s</string>
-<string name="cf_optimizer_copy_entries">複製優選名單</string>
-    <string name="cf_optimizer_copy_entries_summary">把待補傳名單複製到剪貼板，手動上傳</string>
+<string name="cf_optimizer_copy_entries">查看優選結果</string>
+    <string name="cf_optimizer_copy_entries_summary">在文字框裏查看測得的名單，可查看或複製</string>
     <string name="cf_optimizer_retry_upload">重試上傳</string>
     <string name="cf_optimizer_retry_upload_summary">只補傳待傳名單到 Worker（不重新探測）</string>
-    <string name="cf_optimizer_pending_summary">%1$d 條 · 快照時間 %2$s</string>
-    <string name="cf_optimizer_pending_none">沒有待補傳名單 —— 沒有留存過結果</string>
+    <string name="cf_optimizer_pending_summary">%1$d 條 · %2$s</string>
+    <string name="cf_optimizer_pending_none">暫無優選結果 —— 先跑一輪優選</string>
     <string name="cf_optimizer_copy_done">已複製 %1$d 條 —— 可直接貼到雲端編輯器</string>
+    <string name="cf_optimizer_dialog_copy_all">複製全部</string>
     <string name="cf_optimizer_retry_upload_running">正在補傳…</string>
     <string name="cf_optimizer_retry_upload_ok">補傳成功 —— Worker 名單已更新</string>
-    <string name="cf_optimizer_retry_upload_failed">補傳失敗：%1$s —— 可用「複製優選名單」手動兜底</string>
+    <string name="cf_optimizer_retry_upload_failed">補傳失敗：%1$s —— 可打開「查看優選結果」複製名單</string>
 
     <string name="cf_optimizer_params_entry_summary">篩選、配額與行為，全部可調；留空使用預設值</string>
     <string name="cf_optimizer_group_filter">篩選</string>

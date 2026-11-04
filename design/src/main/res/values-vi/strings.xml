@@ -295,16 +295,17 @@
     <string name="cf_optimizer_share_summary">Gửi các tệp đã xuất sang ứng dụng khác</string>
     <string name="cf_optimizer_share_title">Chia sẻ dữ liệu tối ưu CF</string>
     <string name="cf_optimizer_share_failed">Chia sẻ thất bại: %1$s</string>
-<string name="cf_optimizer_copy_entries">Sao chép danh sách kết quả</string>
-    <string name="cf_optimizer_copy_entries_summary">Sao chép danh sách chờ tải lên để tự tay tải lên</string>
+<string name="cf_optimizer_copy_entries">Xem kết quả tối ưu</string>
+    <string name="cf_optimizer_copy_entries_summary">Mở danh sách đã đo trong hộp văn bản để xem hoặc sao chép</string>
     <string name="cf_optimizer_retry_upload">Thử tải lên lại</string>
     <string name="cf_optimizer_retry_upload_summary">Chỉ gửi lại danh sách chờ lên Worker (không dò lại)</string>
-    <string name="cf_optimizer_pending_summary">%1$d mục · chụp lúc %2$s</string>
-    <string name="cf_optimizer_pending_none">Không có danh sách chờ — chưa lưu kết quả nào</string>
+    <string name="cf_optimizer_pending_summary">%1$d mục · %2$s</string>
+    <string name="cf_optimizer_pending_none">Chưa có kết quả — hãy chạy tối ưu trước</string>
     <string name="cf_optimizer_copy_done">Đã sao chép %1$d mục — dán vào trình chỉnh sửa đám mây</string>
+    <string name="cf_optimizer_dialog_copy_all">Sao chép tất cả</string>
     <string name="cf_optimizer_retry_upload_running">Đang tải lên lại…</string>
     <string name="cf_optimizer_retry_upload_ok">Tải lên thành công — danh sách trên Worker đã cập nhật</string>
-    <string name="cf_optimizer_retry_upload_failed">Tải lên thất bại: %1$s — có thể dùng "Sao chép danh sách" để thay thế</string>
+    <string name="cf_optimizer_retry_upload_failed">Tải lên thất bại: %1$s — mở "Xem kết quả tối ưu" để sao chép danh sách</string>
 
     <string name="cf_optimizer_params_entry_summary">Lọc, hạn mức và hành vi — tất cả đều có thể điều chỉnh; giá trị trống dùng mặc định</string>
     <string name="cf_optimizer_group_filter">Lọc</string>
