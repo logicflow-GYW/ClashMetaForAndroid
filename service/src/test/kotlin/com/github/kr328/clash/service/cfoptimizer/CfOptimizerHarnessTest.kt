@@ -19,4 +19,7 @@ class CfOptimizerHarnessTest {
 
     @Test
     fun qualityGate() = runCfQualityGateHarness()
+
+    @Test
+    fun uploadResilience() = runCfOptimizerUploadResilienceHarness()
 }

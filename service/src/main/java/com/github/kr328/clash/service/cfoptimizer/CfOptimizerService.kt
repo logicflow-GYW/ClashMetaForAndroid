@@ -131,8 +131,21 @@ class CfOptimizerService : BaseService() {
         updateForegroundNotification(getString(R.string.running))
 
         when {
-            !result.uploaded ->
-                notifyResult(getString(R.string.cf_optimizer_result_failure, result.uploadReason ?: "unknown"))
+            !result.uploaded -> {
+                // 名单已在上传前落盘（冗余层）：失败通知必须告诉用户数据还在 ——
+                // 指向设置页的「复制优选名单 / 重试上传」，而不是只丢一句 NetworkError。
+                val pending = StateStore(this).pendingUpload()
+                val text = if (pending.isNotEmpty()) {
+                    getString(
+                        R.string.cf_optimizer_result_upload_failed,
+                        result.uploadReason ?: "unknown",
+                        pending.size,
+                    )
+                } else {
+                    getString(R.string.cf_optimizer_result_failure, result.uploadReason ?: "unknown")
+                }
+                notifyResult(text)
+            }
             !result.profileUpdated && result.profileError != null -> {
                 CfLog.w("service: run uploaded but profile refresh failed: ${result.profileError}")
                 notifyResult(getString(R.string.cf_optimizer_result_profile_failed, result.profileError ?: "unknown"))

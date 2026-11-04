@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Network
 import com.github.kr328.clash.service.cfoptimizer.net.PhysicalNetwork
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
@@ -22,10 +23,10 @@ data class CfWorkerSettings(val baseUrl: String, val password: String)
 sealed interface WorkerUploadResult {
     data object Success : WorkerUploadResult
 
-    data class Failure(val reason: WorkerFailureReason) : WorkerUploadResult
+    data class Failure(val reason: WorkerFailureReason, val attempts: Int = 1) : WorkerUploadResult
 }
 
-enum class WorkerFailureReason { InvalidUrl, LoginRejected, UploadRejected, NetworkError, InvalidResponse }
+enum class WorkerFailureReason { InvalidUrl, LoginRejected, UploadRejected, NetworkError, InvalidResponse, ServerError }
 
 /**
  * Test seam for the Worker HTTP protocol. Implementations receive explicit URL, method,
@@ -61,10 +62,21 @@ class WorkerHttpResponse(
  * never accepts a Cloudflare API token. It never logs: failure reporting is limited
  * to [WorkerFailureReason] values; thrown exceptions carry no request, response,
  * cookie, password or list content.
+ *
+ * 上传是整条优选链路里唯一没有容错的环节（拉源/探测各自有多网络与超时兜底），
+ * 而它失败一次就作废一整轮几分钟的探测结果 —— 因此这里内置两层韧性：
+ * 1. [upload] 对**瞬时类失败**（网络 IO、服务端 5xx）做指数退避重试；
+ *    密码错误（LoginRejected）与 4xx 拒绝（UploadRejected）是确定性失败，重试无意义，直接返回。
+ * 2. 网络出口故障转移在 [UrlConnectionWorkerHttpTransport]（Wi-Fi → 蜂窝逐个尝试）。
+ * 重试是安全的：ADD.txt 是整体覆写语义，重复 POST 同一份名单不会产生追加/重复行。
  */
 class CfWorkerClient(
     private val settings: CfWorkerSettings,
     private val transport: WorkerHttpTransport,
+    /** 一次 upload() 内的最大尝试次数（含第一次）；≥1。 */
+    private val maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
+    /** 重试间隔（毫秒），按尝试序号取用；可注入以避免测试真实睡眠。 */
+    private val backoffMillis: List<Long> = DEFAULT_BACKOFF_MILLIS,
 ) {
     suspend fun upload(entries: List<String>): WorkerUploadResult {
         // Fail closed: an empty list must never overwrite the shared remote list.
@@ -75,6 +87,35 @@ class CfWorkerClient(
         val base = normalizeBaseUrl(settings.baseUrl)
             ?: return WorkerUploadResult.Failure(WorkerFailureReason.InvalidUrl)
 
+        val attempts = maxAttempts.coerceAtLeast(1)
+        var lastFailure: WorkerUploadResult.Failure? = null
+
+        repeat(attempts) { attempt ->
+            val result = attemptUpload(base, entries)
+
+            // subject 提为局部 val：when 分支内才能对 Failure smart cast
+            // （无 subject 的 when 不跨分支传播 smart cast —— 直接写 result.reason 编译不过）。
+            val failure = result as? WorkerUploadResult.Failure
+
+            when {
+                result is WorkerUploadResult.Success -> return result
+                failure == null || !failure.reason.isRetryable() -> return result
+                else -> {
+                    lastFailure = failure
+                    // 还有下一次机会才退避等待；最后一次直接返回失败。
+                    if (attempt < attempts - 1) {
+                        delay(backoffMillis.getOrElse(attempt) { backoffMillis.last() })
+                    }
+                }
+            }
+        }
+
+        return lastFailure!!
+            .copy(attempts = attempts)
+    }
+
+    /** 单次完整尝试：login → push。任一步瞬时失败都按该失败原因参与重试判定。 */
+    private suspend fun attemptUpload(base: String, entries: List<String>): WorkerUploadResult {
         val cookie = try {
             login(base)
         } catch (e: WorkerProtocolException) {
@@ -108,7 +149,11 @@ class CfWorkerClient(
         // Redirects are never followed by design: any 3xx from login is a rejection,
         // so the password can never be replayed onto another host.
         if (response.statusCode !in HTTP_SUCCESS_MIN..HTTP_SUCCESS_MAX) {
-            throw WorkerProtocolException(WorkerFailureReason.LoginRejected)
+            // 5xx 是服务端瞬时故障（Cloudflare 边缘抖动），与"密码错误"不同，值得重试。
+            throw WorkerProtocolException(
+                if (response.statusCode >= 500) WorkerFailureReason.ServerError
+                else WorkerFailureReason.LoginRejected
+            )
         }
 
         when (parseSuccess(response.body)) {
@@ -150,7 +195,11 @@ class CfWorkerClient(
         )
 
         if (response.statusCode !in HTTP_SUCCESS_MIN..HTTP_SUCCESS_MAX) {
-            return WorkerUploadResult.Failure(WorkerFailureReason.UploadRejected)
+            // 5xx = 服务端瞬时故障（重试可能成功）；4xx/3xx = 明确拒绝（重试无意义）。
+            return WorkerUploadResult.Failure(
+                if (response.statusCode >= 500) WorkerFailureReason.ServerError
+                else WorkerFailureReason.UploadRejected
+            )
         }
 
         // A 2xx HTML error page is not a successful overwrite. Accept the
@@ -197,6 +246,14 @@ class CfWorkerClient(
     companion object {
         private const val HTTP_SUCCESS_MIN = 200
         private const val HTTP_SUCCESS_MAX = 299
+
+        /** 默认 3 次尝试，间隔 1s / 3s（总上传窗口 ≈ 45s，仍远低于重跑一轮探测的分钟级成本）。 */
+        val DEFAULT_BACKOFF_MILLIS: List<Long> = listOf(1_000L, 3_000L)
+        const val DEFAULT_MAX_ATTEMPTS: Int = 3
+
+        /** 瞬时失败（值得换网络出口再试）：网络 IO 与服务端 5xx。 */
+        fun WorkerFailureReason.isRetryable(): Boolean =
+            this == WorkerFailureReason.NetworkError || this == WorkerFailureReason.ServerError
 
         /**
          * Only canonical HTTPS origins are accepted. Rejects non-HTTPS schemes,
@@ -248,53 +305,83 @@ class CfWorkerClient(
  * Redirects are disabled globally and per connection: the client never follows a
  * cross-host (or any) redirect, so credentials and cookies can never leak to
  * another origin. Response bodies are capped.
+ *
+ * **多物理网络故障转移**：provider 返回候选网络列表（Wi-Fi 优先，其次蜂窝，全部排除 VPN）。
+ * 单个网络上的连接/写入/读取抛 IOException 时，自动换下一个候选网络重发同一请求 ——
+ * 真机实测的失败形状是"Wi-Fi 掉线瞬间整轮作废"或"单网络被运营商 QoS"，而手机上
+ * 往往同时有两条出口。HTTP 层错误（4xx/5xx 响应）**不触发**故障转移 —— 那是服务端
+ * 的答复，换网络没有意义（由客户端层判定是否重试）。
  */
-class UrlConnectionWorkerHttpTransport(private val networkProvider: () -> Network?) : WorkerHttpTransport {
-    /** 便捷构造：按需取当前主物理网络（service 侧使用）。 */
-    constructor(context: Context) : this({ PhysicalNetwork.pick(context) })
+class UrlConnectionWorkerHttpTransport(
+    private val networksProvider: () -> List<Network>,
+) : WorkerHttpTransport {
+    /** 便捷构造：按需取当前全部可用物理网络（service 侧使用）。 */
+    constructor(context: Context) : this({ PhysicalNetwork.candidates(context) })
+
+    /** 兼容旧签名：固定单网络出口。 */
+    constructor(network: Network) : this({ listOf(network) })
 
     override suspend fun execute(request: WorkerHttpRequest): WorkerHttpResponse =
         withContext(Dispatchers.IO) {
-            val url = URL(request.url)
-            val network = networkProvider() ?: throw IOException("no validated physical network")
-            val connection =
-                (PhysicalNetwork.openConnection(network, url) as HttpURLConnection).apply {
-                    requestMethod = request.method
-                    instanceFollowRedirects = false
-                    connectTimeout = TIMEOUT_MILLIS
-                    readTimeout = TIMEOUT_MILLIS
-                    useCaches = false
-                    request.headers.forEach { (name, value) -> setRequestProperty(name, value) }
-                }
-
-            try {
-                request.body?.let { bytes ->
-                    connection.outputStream.use { stream -> stream.write(bytes) }
-                }
-
-                val statusCode = connection.responseCode
-                val headers = connection.headerFields
-                    ?.filterKeys { it != null }
-                    ?.mapKeys { it.key as String }
-                    ?: emptyMap()
-
-                val body: ByteArray? = try {
-                    connection.inputStream?.use { readCapped(it) }
-                } catch (ignored: IOException) {
-                    try {
-                        connection.errorStream?.use { readCapped(it) }
-                    } catch (ignored: IOException) {
-                        null
-                    }
-                }
-
-                WorkerHttpResponse(statusCode, headers, body)
-            } catch (e: IOException) {
-                throw TransportException(e)
-            } finally {
-                connection.disconnect()
+            val networks = networksProvider()
+            if (networks.isEmpty()) {
+                throw TransportException(IOException("no validated physical network"))
             }
+
+            var lastError: TransportException? = null
+
+            for (network in networks) {
+                try {
+                    return@withContext executeOn(network, request)
+                } catch (e: IOException) {
+                    // 记录并换下一个网络出口；HTTP 响应（含 4xx/5xx）不算 IO 失败，不会走到这。
+                    lastError = TransportException(e)
+                }
+            }
+
+            throw lastError!!
         }
+
+    private fun executeOn(network: Network, request: WorkerHttpRequest): WorkerHttpResponse {
+        val url = URL(request.url)
+        val connection =
+            (PhysicalNetwork.openConnection(network, url) as HttpURLConnection).apply {
+                requestMethod = request.method
+                instanceFollowRedirects = false
+                connectTimeout = CONNECT_TIMEOUT_MILLIS
+                readTimeout = READ_TIMEOUT_MILLIS
+                useCaches = false
+                request.headers.forEach { (name, value) -> setRequestProperty(name, value) }
+            }
+
+        try {
+            request.body?.let { bytes ->
+                connection.outputStream.use { stream -> stream.write(bytes) }
+            }
+
+            val statusCode = connection.responseCode
+            val headers = connection.headerFields
+                ?.filterKeys { it != null }
+                ?.mapKeys { it.key as String }
+                ?: emptyMap()
+
+            val body: ByteArray? = try {
+                connection.inputStream?.use { readCapped(it) }
+            } catch (ignored: IOException) {
+                try {
+                    connection.errorStream?.use { readCapped(it) }
+                } catch (ignored: IOException) {
+                    null
+                }
+            }
+
+            return WorkerHttpResponse(statusCode, headers, body)
+        } catch (e: IOException) {
+            throw TransportException(e)
+        } finally {
+            connection.disconnect()
+        }
+    }
 
     private fun readCapped(stream: InputStream): ByteArray {
         val output = ByteArrayOutputStream()
@@ -314,7 +401,9 @@ class UrlConnectionWorkerHttpTransport(private val networkProvider: () -> Networ
     private class TransportException(cause: IOException) : IOException(cause)
 
     private companion object {
-        const val TIMEOUT_MILLIS = 15_000
+        /** 连接建立 15s；响应读取放宽到 30s —— 上传失败大多死在"连上了但响应慢"的弱网。 */
+        const val CONNECT_TIMEOUT_MILLIS = 15_000
+        const val READ_TIMEOUT_MILLIS = 30_000
         const val MAX_BODY_BYTES = 64 * 1024
         const val BUFFER_SIZE_BYTES = 8 * 1024
     }
