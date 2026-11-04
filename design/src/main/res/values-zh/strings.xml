@@ -324,6 +324,17 @@
     <string name="cf_optimizer_share_summary">把导出的文件发给别的应用（聊天 / 网盘 / 邮件）</string>
     <string name="cf_optimizer_share_title">分享 CF 优选数据</string>
     <string name="cf_optimizer_share_failed">分享失败：%1$s</string>
+<string name="cf_optimizer_copy_entries">复制优选名单</string>
+    <string name="cf_optimizer_copy_entries_summary">把待补传名单复制到剪贴板，手动上传</string>
+    <string name="cf_optimizer_retry_upload">重试上传</string>
+    <string name="cf_optimizer_retry_upload_summary">只补传待传名单到 Worker（不重新探测）</string>
+    <string name="cf_optimizer_pending_summary">%1$d 条 · 快照时间 %2$s</string>
+    <string name="cf_optimizer_pending_none">没有待补传名单 —— 没有留存过结果</string>
+    <string name="cf_optimizer_copy_done">已复制 %1$d 条 —— 可直接粘贴到云端编辑器</string>
+    <string name="cf_optimizer_retry_upload_running">正在补传…</string>
+    <string name="cf_optimizer_retry_upload_ok">补传成功 —— Worker 列表已更新</string>
+    <string name="cf_optimizer_retry_upload_failed">补传失败：%1$s —— 可用「复制优选名单」手动兜底</string>
+
     <string name="cf_optimizer_params_entry_summary">筛选、配额与行为，全部可调；留空使用默认值</string>
     <string name="cf_optimizer_group_filter">筛选</string>
     <string name="cf_optimizer_group_quota">配额与并发</string>

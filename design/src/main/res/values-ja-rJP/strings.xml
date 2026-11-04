@@ -308,6 +308,17 @@
     <string name="cf_optimizer_share_summary">書き出したファイルを他のアプリへ送る（チャット / クラウド / メール）</string>
     <string name="cf_optimizer_share_title">CF 最適化データを共有</string>
     <string name="cf_optimizer_share_failed">共有できませんでした：%1$s</string>
+<string name="cf_optimizer_copy_entries">最適化リストをコピー</string>
+    <string name="cf_optimizer_copy_entries_summary">未アップロードのリストをクリップボードにコピーして手動アップロード</string>
+    <string name="cf_optimizer_retry_upload">アップロードを再試行</string>
+    <string name="cf_optimizer_retry_upload_summary">保留中のリストだけ Worker へ再送（再プローブなし）</string>
+    <string name="cf_optimizer_pending_summary">%1$d 件 · スナップショット %2$s</string>
+    <string name="cf_optimizer_pending_none">保留中のリストはありません — 保存された結果はありません</string>
+    <string name="cf_optimizer_copy_done">%1$d 件コピーしました — クラウドエディタに貼り付けてください</string>
+    <string name="cf_optimizer_retry_upload_running">再アップロード中…</string>
+    <string name="cf_optimizer_retry_upload_ok">アップロード成功 — Worker のリストを更新しました</string>
+    <string name="cf_optimizer_retry_upload_failed">アップロード失敗：%1$s — 「最適化リストをコピー」で手動対応できます</string>
+
     <string name="cf_optimizer_params_entry_summary">フィルタリング・クォータ・動作はすべて調整可能です。空欄の場合はデフォルト値を使用します</string>
     <string name="cf_optimizer_group_filter">フィルタリング</string>
     <string name="cf_optimizer_group_quota">クォータと同時実行</string>

@@ -1,11 +1,14 @@
 package com.github.kr328.clash.design
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.view.View
 import androidx.core.content.FileProvider
+import androidx.core.content.getSystemService
 import com.github.kr328.clash.design.databinding.DesignSettingsCfOptimizerBinding
 import com.github.kr328.clash.design.dialog.requestModelTextInput
 import com.github.kr328.clash.design.preference.*
@@ -114,6 +117,19 @@ class CfOptimizerSettingsDesign(
                     }
                 }
             }
+
+            // 冗余出口：上一轮上传失败时名单已落盘（上传前快照），这里是用户手里
+            // 的数据出口 —— 「复制」去云端手动粘贴，「重试上传」只补传不重跑探测。
+            // 没有快照（从未失败过/已补传成功）时两行隐藏，不占页面。
+            val copyEntriesPref = clickable(
+                title = R.string.cf_optimizer_copy_entries,
+                summary = R.string.cf_optimizer_copy_entries_summary,
+            )
+
+            val retryUploadPref = clickable(
+                title = R.string.cf_optimizer_retry_upload,
+                summary = R.string.cf_optimizer_retry_upload_summary,
+            )
 
             // 运行数据：摘要显示"攒了多少"，点一下导出 —— 导出到下载目录下的导出子文件夹
             // （Download/CF优选/），零权限，文件管理器 / Termux / adb 都能直接拿到。
@@ -234,6 +250,57 @@ class CfOptimizerSettingsDesign(
                 }
             }
 
+            // 冗余出口的初始可见性 + 摘要（快照时间）。放在 Main 协程里与其他初始摘要一致。
+            launch(Dispatchers.Main) {
+                refreshPendingPrefs(stateStore, copyEntriesPref, retryUploadPref)
+            }
+
+            copyEntriesPref.clicked {
+                launch(Dispatchers.Main) {
+                    val entries = withContext(Dispatchers.IO) { stateStore.pendingUpload() }
+
+                    if (entries.isEmpty()) {
+                        showToast(R.string.cf_optimizer_pending_none, ToastDuration.Long)
+                        return@launch
+                    }
+
+                    val data = ClipData.newPlainText(
+                        "cf_optimizer_entries",
+                        entries.joinToString("\n"),
+                    )
+
+                    context.getSystemService<ClipboardManager>()?.setPrimaryClip(data)
+
+                    showToast(
+                        context.getString(R.string.cf_optimizer_copy_done, entries.size),
+                        ToastDuration.Long,
+                    )
+                }
+            }
+
+            retryUploadPref.clicked {
+                launch(Dispatchers.Main) {
+                    // 按钮立即反馈进入补传；补传走客户端内置的多网络故障转移 + 退避重试，
+                    // 最长几十秒 —— 结果用 toast 如实呈现，不假装秒成功。
+                    retryUploadPref.summary = context.getText(R.string.cf_optimizer_retry_upload_running)
+
+                    val reason = withContext(Dispatchers.IO) {
+                        stateStore.retryPendingUpload(context)
+                    }
+
+                    if (reason == null) {
+                        showToast(R.string.cf_optimizer_retry_upload_ok, ToastDuration.Long)
+                    } else {
+                        showToast(
+                            context.getString(R.string.cf_optimizer_retry_upload_failed, reason),
+                            ToastDuration.Long,
+                        )
+                    }
+
+                    refreshPendingPrefs(stateStore, copyEntriesPref, retryUploadPref)
+                }
+            }
+
             // 导出运行数据：记忆库 + 最近一轮候选明细 + 每轮摘要，复制到下载目录下的导出子文件夹。
             dataPref.clicked {
                 launch(Dispatchers.Main) {
@@ -332,6 +399,34 @@ class CfOptimizerSettingsDesign(
         val runs = CfOptimizerRunLog(context).runCount()
 
         return context.getString(R.string.cf_optimizer_data_summary_value, nodes, runs)
+    }
+
+    /**
+     * 刷新「复制优选名单 / 重试上传」两行的可见性与摘要。
+     * 没有待传快照时隐藏两行（用户没失败过，这两行是噪音）；
+     * 有快照时摘要 = 快照时间 + 条数，让用户知道补传的是什么。
+     */
+    private fun refreshPendingPrefs(
+        stateStore: StateStore,
+        copyEntriesPref: ClickablePreference,
+        retryUploadPref: ClickablePreference,
+    ) {
+        val entries = stateStore.pendingUpload()
+
+        if (entries.isEmpty()) {
+            copyEntriesPref.view.visibility = View.GONE
+            retryUploadPref.view.visibility = View.GONE
+            return
+        }
+
+        copyEntriesPref.view.visibility = View.VISIBLE
+        retryUploadPref.view.visibility = View.VISIBLE
+
+        val at = stateStore.pendingUploadAt()
+        val time = if (at > 0) SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(at)) else ""
+
+        copyEntriesPref.summary = context.getString(R.string.cf_optimizer_pending_summary, entries.size, time)
+        retryUploadPref.summary = context.getText(R.string.cf_optimizer_retry_upload_summary)
     }
 
     /**

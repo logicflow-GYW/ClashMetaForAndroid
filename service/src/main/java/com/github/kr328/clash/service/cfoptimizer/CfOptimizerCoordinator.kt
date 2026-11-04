@@ -455,10 +455,16 @@ class CfOptimizerCoordinator(private val context: Context) {
             "run=$runId upload begin entries=${entries.size} (custom=${entries.size - ranked.size} ranked=${ranked.size})",
         )
 
+        // 4.5 名单先落盘再上传（上传前快照）：上传失败时结果不丢 —— 用户可以在设置页
+        //     「复制优选名单」手动粘贴到云端，或「重试上传」只补传这一份（不重跑探测）。
+        state.savePendingUpload(entries, runId)
+
         // 5. 上传 Worker（整体覆写语义：只在本轮有达标结果时才覆盖）。
+        //    传输层绑定全部候选物理网络（Wi-Fi → 蜂窝故障转移，仍绝不走本应用 VPN）；
+        //    客户端层对瞬时失败做指数退避重试（见 CfWorkerClient）。
         val client = CfWorkerClient(
             CfWorkerSettings(baseUrl, password),
-            UrlConnectionWorkerHttpTransport { physicalNetwork },
+            UrlConnectionWorkerHttpTransport { PhysicalNetwork.candidates(context) },
         )
         val uploadStartedAt = System.currentTimeMillis()
         val uploadResult = client.upload(entries)
@@ -471,10 +477,13 @@ class CfOptimizerCoordinator(private val context: Context) {
 
         val uploaded = uploadResult is WorkerUploadResult.Success
         val uploadReason = (uploadResult as? WorkerUploadResult.Failure)?.reason?.name
+        val uploadAttempts = (uploadResult as? WorkerUploadResult.Failure)?.attempts ?: 1
 
         if (!uploaded) {
+            // pendingUpload 已在 4.5 落盘：失败不清除 —— 设置页的「复制优选名单 / 重试上传」
+            // 靠它工作；下一次成功上传（含手动补传）时才清除。
             CfLog.w(
-                "run=$runId abort reason=upload_$uploadReason entries=${entries.size} " +
+                "run=$runId abort reason=upload_$uploadReason attempts=$uploadAttempts entries=${entries.size} " +
                     "after=${System.currentTimeMillis() - uploadStartedAt}ms",
             )
             return Result(allCandidates.size, ranked.size, false, uploadReason, false, null)
@@ -486,8 +495,10 @@ class CfOptimizerCoordinator(private val context: Context) {
         state.saveRunState(STAGE_UPLOAD, 1, 1)
         onProgress(STAGE_UPLOAD, 1, 1)
 
-        // 6. 上传成功：先保存 last-known-good（下次空扫描/失败时可参考），再刷新订阅。
+        // 6. 上传成功：先保存 last-known-good（下次空扫描/失败时可参考），再刷新订阅；
+        //    同时清除待补传快照（它的使命已结束）。
         StateStore(context).saveLastKnownGood(entries)
+        state.clearPendingUpload()
         CfLog.i("run=$runId lastKnownGood saved entries=${entries.size}")
 
         var profileUpdated = false
@@ -658,6 +669,72 @@ class StateStore(context: Context) {
             .apply()
     }
 
+    /**
+     * 上传前快照（冗余层）：名单在上传动作开始**之前**落盘。
+     * 上传失败时它就是用户手里唯一的数据 —— 「复制优选名单」（手动粘贴云端）
+     * 与「重试上传」（只补传，不重跑探测）都从它读。
+     * 上传成功后由 [clearPendingUpload] 清除；新的一轮在 4.5 步无条件覆盖旧快照。
+     */
+    fun savePendingUpload(entries: List<String>, runId: String) {
+        preferences.edit()
+            .putString(KEY_PENDING_UPLOAD, entries.joinToString("\n"))
+            .putString(KEY_PENDING_UPLOAD_RUN, runId)
+            .putLong(KEY_PENDING_UPLOAD_AT, System.currentTimeMillis())
+            .apply()
+    }
+
+    fun pendingUpload(): List<String> =
+        preferences.getString(KEY_PENDING_UPLOAD, null)
+            ?.split('\n')
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
+
+    fun pendingUploadRunId(): String = preferences.getString(KEY_PENDING_UPLOAD_RUN, null).orEmpty()
+
+    fun pendingUploadAt(): Long = preferences.getLong(KEY_PENDING_UPLOAD_AT, 0L)
+
+    fun clearPendingUpload() {
+        preferences.edit()
+            .remove(KEY_PENDING_UPLOAD)
+            .remove(KEY_PENDING_UPLOAD_RUN)
+            .remove(KEY_PENDING_UPLOAD_AT)
+            .apply()
+    }
+
+    /**
+     * 把待传快照名单重新 POST 到 Worker（设置页「重试上传」的执行体）。
+     * 不重跑拉源/探测/评分（分钟级）——只补传这一份名单。
+     * 成功返回 null 并走主流程第 6 步收尾（last-known-good + 清快照）；
+     * 失败返回原因名（配置缺失也走这条路，UI 直接可读）。
+     */
+    suspend fun retryPendingUpload(context: Context): String? {
+        val entries = pendingUpload()
+        if (entries.isEmpty()) return "no_pending"
+
+        val settingsStore = CfOptimizerSettingsStore(context)
+        val secretStore = KeystoreCfOptimizerSecretStore(context)
+        val baseUrl = settingsStore.workerBaseUrl
+        val password = secretStore.readPassword()
+
+        if (baseUrl.isBlank()) return "not_configured"
+        if (password.isNullOrEmpty()) return "password_missing"
+
+        val client = CfWorkerClient(
+            CfWorkerSettings(baseUrl, password),
+            UrlConnectionWorkerHttpTransport { PhysicalNetwork.candidates(context) },
+        )
+
+        return when (val result = client.upload(entries)) {
+            is WorkerUploadResult.Success -> {
+                // 补传成功 = 主流程第 6 步收尾：last-known-good + 清快照。
+                StateStore(context).saveLastKnownGood(entries)
+                clearPendingUpload()
+                null
+            }
+            is WorkerUploadResult.Failure -> result.reason.name
+        }
+    }
+
     fun saveLastKnownGood(entries: List<String>) {
         preferences.edit()
             .putString(KEY_LAST_KNOWN_GOOD, entries.joinToString("\n"))
@@ -750,6 +827,9 @@ class StateStore(context: Context) {
         private const val LEGACY_RUN_UPDATED_AT = "run_updated_at"
         private const val KEY_ACTIVE_RUN_ID = "cfoptimizer_active_run_id"
         private const val KEY_LAST_ATTEMPT_AT = "cfoptimizer_last_attempt_at"
+        private const val KEY_PENDING_UPLOAD = "cfoptimizer_pending_upload"
+        private const val KEY_PENDING_UPLOAD_RUN = "cfoptimizer_pending_upload_run"
+        private const val KEY_PENDING_UPLOAD_AT = "cfoptimizer_pending_upload_at"
         private const val KEY_LAST_KNOWN_GOOD = "cfoptimizer_last_known_good"
         private const val KEY_LAST_SUCCESS_AT = "cfoptimizer_last_success_at"
         private const val KEY_LAST_PROFILE_REFRESH_AT = "cfoptimizer_last_profile_refresh_at"

@@ -26,6 +26,7 @@
     <string name="cf_optimizer_stage_download">测速 %1$d/%2$d</string>
     <string name="cf_optimizer_stage_upload">正在上传到 Worker</string>
     <string name="cf_optimizer_result_failure">CF 优选失败: %1$s</string>
+    <string name="cf_optimizer_result_upload_failed">CF 优选上传失败: %1$s —— %2$d 条名单已留存在本机，可在 CF 优选设置里「复制优选名单 / 重试上传」</string>
     <string name="cf_optimizer_result_profile_failed">列表已上传，订阅更新失败: %1$s</string>
     <string name="cf_optimizer_stage_tcp">连通性预筛 %1$d/%2$d</string>
 </resources>
