@@ -14,7 +14,6 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.net.HttpURLConnection
-import java.net.InetAddress
 import java.net.URI
 import java.net.URL
 import kotlin.random.Random
@@ -96,10 +95,6 @@ object CfCandidateSource {
     private const val CONNECT_TIMEOUT_MS: Int = 5_000
     private const val READ_TIMEOUT_MS: Int = 10_000
     private const val MAX_REDIRECTS: Int = 3
-
-    /** Cloudflare 支持的入口端口（与引擎白名单一致，双保险）。 */
-    private val ALLOWED_PORTS: Set<Int> =
-        setOf(80, 8080, 8880, 2052, 2082, 2086, 2095, 443, 2053, 2083, 2087, 2096, 8443)
 
     /**
      * 单轮源拉取并发上限。源是公网静态文本（单源字节上限 [MAX_SOURCE_BYTES]），有界并发把
@@ -325,26 +320,9 @@ object CfCandidateSource {
         return first.host.equals(second.host, ignoreCase = true) && port(first) == port(second)
     }
 
-    /** 行格式 `IP:port`（`#` 后缀已由调用方剥离）；拒绝一切非字面 IPv4。 */
-    private fun parseLine(line: String): CandidateIp? {
-        val match = Regex("""^(\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5})$""").find(line) ?: return null
-
-        val address = match.groupValues[1]
-        val port = match.groupValues[2].toIntOrNull() ?: return null
-
-        if (port !in ALLOWED_PORTS) return null
-        if (!isPublicLiteralIpv4(address)) return null
-
-        return CandidateIp(address = address, port = port, source = "remote")
-    }
-
-    /** 字面公网 IPv4（不触发 DNS；拒绝 private/loopback/multicast/reserved/link-local/unspecified）。 */
-    private fun isPublicLiteralIpv4(address: String): Boolean {
-        val addr = runCatching { InetAddress.getByName(address) }.getOrNull() ?: return false
-
-        if (addr !is java.net.Inet4Address) return false
-
-        return !(addr.isSiteLocalAddress || addr.isLoopbackAddress || addr.isMulticastAddress ||
-                addr.isAnyLocalAddress || addr.isLinkLocalAddress)
-    }
+    /**
+     * 行格式派发到 [CfSourceLineParser]（`IP:port` / `[v6]:port` / 裸 v6 → 443）。
+     * 地址与端口校验的单一来源在引擎，这里不再重复一套 IPv4 判据。
+     */
+    private fun parseLine(line: String): CandidateIp? = CfSourceLineParser.parseCandidateLine(line)
 }

@@ -145,6 +145,14 @@ object CfOptimizerEngine {
         return if (s.length == 2 && s.all { it in 'A'..'Z' }) s else REGION_FALLBACK
     }
 
+    /**
+     * 字面 IP 规范化（单一入口）：合法公网字面量返回规范化文本，否则 null。
+     *
+     * 源解析（`source/CfSourceLineParser`）与 [rank] 共用这一套判据 —— 两处各写一套，
+     * 迟早出现「源收进来、评分离场又丢弃」的静默浪费，而且两边对 v6 的结论会不一致。
+     */
+    fun normalizeLiteralAddress(raw: String): String? = validateAddress(raw)
+
     private fun keyOf(c: CandidateIp): String? {
         val addr = c.address.trim()
         if (addr.isEmpty() || c.port !in 1..65535) return null
