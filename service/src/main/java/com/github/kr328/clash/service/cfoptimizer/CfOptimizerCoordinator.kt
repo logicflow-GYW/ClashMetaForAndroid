@@ -14,6 +14,7 @@ import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsSt
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerTuning
 import com.github.kr328.clash.service.cfoptimizer.settings.KeystoreCfOptimizerSecretStore
 import com.github.kr328.clash.service.cfoptimizer.source.CfCandidateSource
+import com.github.kr328.clash.service.cfoptimizer.source.CfSourceLineParser
 import com.github.kr328.clash.service.cfoptimizer.worker.CfWorkerClient
 import com.github.kr328.clash.service.cfoptimizer.worker.CfWorkerSettings
 import com.github.kr328.clash.service.cfoptimizer.worker.UrlConnectionWorkerHttpTransport
@@ -595,30 +596,33 @@ class CfOptimizerCoordinator(private val context: Context) {
     }
 
     /**
-     * 解析 Worker 行 `IP:port#tag` 回 (address, port)——用于把 last-known-good 节点
-     * 还原成候选（原版记忆库优先节点的等价物）。
+     * 解析 Worker 行 `IP:port#tag` / `[v6]:port#tag` 回 (address, port)——用于把
+     * last-known-good 节点还原成候选（原版记忆库优先节点的等价物）。
+     *
+     * 解析器与源行共用 `CfSourceLineParser`：之前这里只认 IPv4，上一轮推上去的 v6 节点
+     * 这轮会被静默丢掉（引擎与 Worker 行格式都支持 `[v6]:port#CC`）。
      */
-    private fun parseWorkerLine(line: String): Pair<String, Int>? {
-        val entry = line.substringBefore('#').trim()
-        val match = Regex("""^(\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5})$""").find(entry) ?: return null
-
-        return match.groupValues[1] to (match.groupValues[2].toIntOrNull() ?: return null)
-    }
+    private fun parseWorkerLine(line: String): Pair<String, Int>? =
+        CfSourceLineParser.parseWorkerLine(line)
 
     /**
      * CIDR 前缀去重（原版 cidr_seen 语义）：同一前缀网段只保留排名最高的条目，
      * 让 Worker 列表分散在不同网段。解析失败的行保留（不因 tag 格式抖动丢结果）。
      *
-     * [prefixLength] 用户可调（原版 `IPV4_DEDUP_PREFIX`，默认 24）；非 IPv4 字面量（如 IPv6）
-     * 不做前缀归并 —— 由输入校验决定它们是否还在池子里，不在这里猜。
+     * [prefixLength] 用户可调（原版 `IPV4_DEDUP_PREFIX`，默认 24）。IPv6 按原脚本
+     * `IPV6_DEDUP_PREFIX = 48` 归并（address 是引擎规范化后的完整形式，直接取前 3 段）。
      */
     private fun dedupeByPrefix(ranked: List<OptimizedEntry>, prefixLength: Int): List<OptimizedEntry> {
         val seen = HashSet<String>()
         val octetsKept = (prefixLength.coerceIn(8, 32) + 7) / 8
 
         return ranked.filter { entry ->
-            val octets = entry.address.split('.')
-            val prefix = if (octets.size == 4) octets.take(octetsKept).joinToString(".") else null
+            val prefix = if (entry.address.contains(':')) {
+                entry.address.split(':').take(IPV6_DEDUP_HEXTETS).joinToString(":")
+            } else {
+                val octets = entry.address.split('.')
+                if (octets.size == 4) octets.take(octetsKept).joinToString(".") else null
+            }
 
             prefix == null || seen.add(prefix)
         }
@@ -644,6 +648,9 @@ class CfOptimizerCoordinator(private val context: Context) {
         const val STAGE_RANK: String = "rank"
         const val STAGE_UPLOAD: String = "upload"
         const val STAGE_DONE: String = "done"
+
+        /** IPv6 去重前缀段数（原脚本 `IPV6_DEDUP_PREFIX = 48` → 48/16 = 3 段）。 */
+        private const val IPV6_DEDUP_HEXTETS: Int = 3
 
     }
 }
