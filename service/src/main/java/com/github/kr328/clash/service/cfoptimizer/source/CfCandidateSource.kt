@@ -100,10 +100,19 @@ object CfCandidateSource {
      * 单轮源拉取并发上限。源是公网静态文本（单源字节上限 [MAX_SOURCE_BYTES]），有界并发把
      * 「部分源直连超时」的墙钟从串行累加（12 源 × 最坏 ~15s ≈ 180s，真机 10-03 实测 sources
      * 段 164-207s）压到约 1/4。不引入默认路由回落 —— 并发改变的是墙钟，不改变
-     * 「源流量只走物理直连」的语义。刻意不做用户可调项：源数 ≤24、每源超时已封顶，
+     * 「源流量只走物理直连」的语义。刻意不做用户可调项：源数 ≤200、每源超时已封顶，
      * 并发度只影响墙钟不影响结果，为它加设置项（UI/存储/语言文件）不划算。
      */
-    private const val SOURCE_CONCURRENCY: Int = 4
+    private const val SOURCE_CONCURRENCY: Int = 16
+
+    /**
+     * 单个域名下的并发上限。
+     *
+     * 导航站的 96 个源里有 78 个属于同一个域名（`bestcf.pages.dev`）——原版用 `asyncio.gather`
+     * 一次性全发，实测 23–44 个超时（自己把自己压垮），后来改成按域名分桶限流。
+     * 这里从一开始就分桶：全局 16、同域 6。
+     */
+    private const val SOURCE_PER_HOST_CONCURRENCY: Int = 6
 
     /** 单源拉取结果（有界并发收集，完成后按源顺序合并 —— 与串行版相同的去重优先级与日志）。 */
     private class SourceFetchResult(
@@ -136,23 +145,34 @@ object CfCandidateSource {
         // 有界并发（[SOURCE_CONCURRENCY]）：单源超时只拖慢自己，不再拖满整轮；
         // 共享 Random 并发不安全，抽样洗牌在各自协程内用独立 Random 完成（与串行版同语义）。
         val semaphore = Semaphore(SOURCE_CONCURRENCY)
+        val hostSemaphores = sources
+            .map { hostOf(it) }
+            .distinct()
+            .associateWith { Semaphore(SOURCE_PER_HOST_CONCURRENCY) }
+
         val fetched: List<SourceFetchResult> = coroutineScope {
             sources.map { url ->
+                val hostPermit = hostSemaphores.getValue(hostOf(url))
+
                 async {
                     semaphore.withPermit {
-                        val startedAtMs = System.currentTimeMillis()
-                        try {
-                            SourceFetchResult(
-                                url,
-                                downloadLines(network, url),
-                                null,
-                                System.currentTimeMillis() - startedAtMs,
-                            )
-                        } catch (e: IOException) {
-                            CfLog.w(
-                                "source fetch failed route=physical error=${e.javaClass.simpleName}: ${e.message}",
-                            )
-                            SourceFetchResult(url, null, e, System.currentTimeMillis() - startedAtMs)
+                        hostPermit.withPermit {
+                            val startedAtMs = System.currentTimeMillis()
+
+                            try {
+                                SourceFetchResult(
+                                    url,
+                                    downloadLines(network, url),
+                                    null,
+                                    System.currentTimeMillis() - startedAtMs,
+                                )
+                            } catch (e: IOException) {
+                                CfLog.w(
+                                    "source fetch failed route=physical error=" +
+                                        "${e.javaClass.simpleName}: ${e.message}",
+                                )
+                                SourceFetchResult(url, null, e, System.currentTimeMillis() - startedAtMs)
+                            }
                         }
                     }
                 }
@@ -233,6 +253,10 @@ object CfCandidateSource {
         if (!uri.path.orEmpty().endsWith(".txt", ignoreCase = true)) return null
         return uri.toString()
     }
+
+    /** 限流用的域名键（解析失败时退回整条 URL —— 宁可多限一个桶，也不共享全局桶）。 */
+    private fun hostOf(url: String): String =
+        runCatching { URI(url).host }.getOrNull() ?: url
 
     /** 源 URL 的日志形态：去掉 query（防个别源把 token 放 query 里被写进日志）。 */
     private fun shortSourceUrl(url: String): String = url.substringBefore('?')

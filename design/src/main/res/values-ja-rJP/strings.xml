@@ -295,6 +295,7 @@
     <string name="cf_optimizer_exclude_countries">除外国（カンマ区切り）</string>
     <string name="cf_optimizer_only_countries">許可国（空で無効）</string>
     <string name="cf_optimizer_sources_per_run">1回のソース数</string>
+    <string name="cf_optimizer_cidr_scan">実行ごとの CIDR スキャン数</string>
     <string name="cf_optimizer_per_source_sample">ソースあたりのサンプル数</string>
     <string name="cf_optimizer_max_candidates">候補の上限</string>
     <string name="cf_optimizer_min_upload_entries">アップロード基準</string>

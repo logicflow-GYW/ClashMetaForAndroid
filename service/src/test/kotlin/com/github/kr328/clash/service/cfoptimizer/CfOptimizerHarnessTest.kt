@@ -22,4 +22,7 @@ class CfOptimizerHarnessTest {
 
     @Test
     fun uploadResilience() = runCfOptimizerUploadResilienceHarness()
+
+    @Test
+    fun parity() = runCfParityHarness()
 }

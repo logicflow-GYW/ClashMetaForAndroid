@@ -292,6 +292,7 @@
     <string name="cf_optimizer_exclude_countries">排除國家（逗號分隔）</string>
     <string name="cf_optimizer_only_countries">只選國家（留空不啟用）</string>
     <string name="cf_optimizer_sources_per_run">每輪源數</string>
+    <string name="cf_optimizer_cidr_scan">每輪盲掃條數</string>
     <string name="cf_optimizer_per_source_sample">單源抽樣條數</string>
     <string name="cf_optimizer_max_candidates">候選上限</string>
     <string name="cf_optimizer_min_upload_entries">上傳門檻</string>

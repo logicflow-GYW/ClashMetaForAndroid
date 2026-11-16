@@ -126,6 +126,20 @@ class CfOptimizerSettingsStore(context: Context) {
     val perSourceSample: Int get() = CfOptimizerTuning.perSourceSample(perSourceSampleRaw)
 
     /**
+     * 每轮从 CF 官方网段盲扫的地址数（原版 `RANDOM_SCAN_COUNT`；默认与依据见
+     * [CfOptimizerTuning.CIDR_SCAN_COUNT_DEFAULT]）。0 = 关闭盲扫。
+     *
+     * 与"源"的区别：源是别人公开过的地址（96 个源并集仅约 1400 条），盲扫是从官方网段里随机抽
+     * 从未被公开的地址 —— 原版一轮 6794 条候选里约 3000 条来自这里。
+     */
+    var cidrScanCountRaw: String by store.string(
+        key = "cfoptimizer_cidr_scan_count",
+        defaultValue = CfOptimizerTuning.CIDR_SCAN_COUNT_DEFAULT.toString(),
+    )
+
+    val cidrScanCount: Int get() = CfOptimizerTuning.cidrScanCount(cidrScanCountRaw)
+
+    /**
      * 每轮进入 TTFB 探测的候选上限（**昂贵层**，默认 600）。
      *
      * 只作用在 TCP 存活集上：原始池 = 本值 × [CfOptimizerTuning.RAW_POOL_FACTOR_DEFAULT]（默认 2，可调），
@@ -140,10 +154,16 @@ class CfOptimizerSettingsStore(context: Context) {
 
     val maxCandidates: Int get() = CfOptimizerTuning.maxCandidates(maxCandidatesRaw)
 
-    /** 上传质量门（原版 `SMART_PUSH_MIN_NODES`；真机日志一轮推了 8 个）。默认 6：与原版产出规模相称，仍留着"太少就宁可不动共享列表"的保护。 */
+    /**
+     * 上传质量门（原版 `SMART_PUSH_MIN_NODES`）。
+     *
+     * 默认值**只从 [CfOptimizerTuning.MIN_UPLOAD_ENTRIES_DEFAULT] 取**：这里曾经硬编码 "6"，
+     * 与 Tuning 里的常量各说各话 —— 改常量对老用户不生效（pref 早已有值），排查时极难看出
+     * "默认值改了但行为没变"。同一份知识只留一处。
+     */
     var minUploadEntriesRaw: String by store.string(
         key = "cfoptimizer_min_upload_entries",
-        defaultValue = "6",
+        defaultValue = CfOptimizerTuning.MIN_UPLOAD_ENTRIES_DEFAULT.toString(),
     )
 
     val minUploadEntries: Int get() = CfOptimizerTuning.minUploadEntries(minUploadEntriesRaw)
