@@ -14,6 +14,7 @@ import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerSettingsSt
 import com.github.kr328.clash.service.cfoptimizer.settings.CfOptimizerTuning
 import com.github.kr328.clash.service.cfoptimizer.settings.KeystoreCfOptimizerSecretStore
 import com.github.kr328.clash.service.cfoptimizer.source.CfCandidateSource
+import com.github.kr328.clash.service.cfoptimizer.source.CfCidrScan
 import com.github.kr328.clash.service.cfoptimizer.source.CfSourceLineParser
 import com.github.kr328.clash.service.cfoptimizer.worker.CfWorkerClient
 import com.github.kr328.clash.service.cfoptimizer.worker.CfWorkerSettings
@@ -21,6 +22,7 @@ import com.github.kr328.clash.service.cfoptimizer.worker.UrlConnectionWorkerHttp
 import com.github.kr328.clash.service.cfoptimizer.worker.WorkerUploadResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import java.util.TimeZone
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -29,7 +31,9 @@ import java.util.concurrent.TimeUnit
  *
  * 失败语义（fail-safe）：
  * - 任何一步失败都**不覆盖** Worker 现有列表（空列表/上传失败/取消均不上传）；
- * - 只有非空、越过质量门的列表才上传；上传成功后先保存 last-known-good，再刷新订阅；
+ * - 名单非空就上传：不足质量门时先用 [CfAdaptiveGate] 放宽一轮门槛，仍不足则**告警但照传**
+ *   （与蓝本一致 —— 静默跳过会让 Worker 停在更旧的名单上，用户看到的是"它不动了"）；
+ * - 上传成功后先保存 last-known-good，再刷新订阅；
  * - 订阅刷新失败时 last-known-good 已保存，Worker 侧仍是本轮新列表（可手动恢复），
  *   结果里如实区分「上传成功、订阅刷新失败」，不称全链路成功。
  */
@@ -117,6 +121,7 @@ class CfOptimizerCoordinator(private val context: Context) {
         val sourcesPerRun = settingsStore.sourcesPerRun
         val perSourceSample = settingsStore.perSourceSample
         val maxCandidates = settingsStore.maxCandidates
+        val cidrScanCount = settingsStore.cidrScanCount
 
         // 探测 / 测速参数（原版 cf_config.py 的并发、超时、下载大小）：一轮读一次快照、整轮复用 ——
         // 中途改设置不能让同一轮出现两套并发；探针层只认这份快照，不直接读设置。
@@ -239,6 +244,39 @@ class CfOptimizerCoordinator(private val context: Context) {
         markStage(STAGE_SOURCES)
         CfLog.i("run=$runId sources done candidates=${candidates.size}")
 
+        // 1.4 官方网段盲扫（原版 `generate_random_ips` 的等价物）。
+        //
+        // 为什么在"源"之后还要这一段：公开 .txt 源是所有使用者共用的同一批地址（实测 96 个源并集
+        // 仅约 1400 个唯一 IP:port），只吃源就等于永远在别人已经公开过的地址里挑。真机 11-16 那轮
+        // 153 条候选全部来自这 ~1400 条的随机子集，最终 7 条里有 4 条只有 3.8–4.7 Mbps。
+        // 原版一轮 6794 条候选里约 3000 条来自盲扫 —— 它不是在"更会评分"，它是有新地址可测。
+        //
+        // 盲扫与公开源**各占一半原始池预算**（见下面 `scanReserve`）：两者数量差一个量级时，
+        // 直接 `take()` 会让先来的一方把另一方整段挤掉。
+        val scannedCandidates = if (cidrScanCount > 0) {
+            val history = memory?.snapshot().orEmpty()
+            val scanWeights = CfCidrScan.weights(
+                history.map { (key, record) ->
+                    CfCidrScan.History(
+                        address = key.substringBeforeLast(':'),
+                        passes = record.passes,
+                        runs = record.runs,
+                        hasCurrentBucketScore = record.stageScores.isNotEmpty(),
+                    )
+                },
+            )
+
+            CfCidrScan.generate(cidrScanCount, scanWeights)
+        } else {
+            emptyList()
+        }
+
+        if (scannedCandidates.isNotEmpty()) {
+            CfLog.i("run=$runId cidr scan generated=${scannedCandidates.size} (requested=$cidrScanCount)")
+
+            markStage("cidr_scan")
+        }
+
         // 1.5 优先复测池 = 记忆库置信度 top-N（跨轮历史）+ 上轮写入 Worker 的节点。
         //     记忆库比 last-known-good 更准：它记得谁**稳定**，而不只是谁上一轮在名单里；
         //     置信度含成功率、新鲜度衰减与"当前时段"加成（原版 get_priority_candidates 口径）。
@@ -260,7 +298,15 @@ class CfOptimizerCoordinator(private val context: Context) {
         // 记忆库里连续失败达阈值的地址：冷却期内不再从源池取样探测（把配额留给新 IP）。
         // 只过滤"新来的"源候选——优先池里的节点是历史验证过的，不在此列。
         val blockedAddresses = memory?.blockedAddresses().orEmpty()
-        val freshCandidates = candidates.filter { it.address !in blockedAddresses }
+        // 源候选与盲扫候选**分预算**：两者之和既受 `rawPoolLimit` 约束，就不能让先来的源把
+        // 盲扫挤光（源池最多 ~1400 条，而默认盲扫 3000 条 —— 不分预算时盲扫会被 `take()` 整段截断，
+        // 等于白生成了 3000 个随机地址）。盲扫固定拿走一半名额，源候选拿另一半。
+        val scanReserve = if (scannedCandidates.isEmpty()) 0 else minOf(scannedCandidates.size, rawPoolLimit / 2)
+        val listReserve = (rawPoolLimit - scanReserve).coerceAtLeast(0)
+
+        val freshCandidates = (candidates.take(listReserve) + scannedCandidates.take(scanReserve))
+            .filter { it.address !in blockedAddresses }
+            .distinctBy { it.address to it.port }
 
         // 优先池在前、源候选在后，总池封顶 —— 记忆池越大，留给"探索新 IP"的名额越少，
         // 这就是探索/利用的权衡点：上一轮稳定节点越可信，本轮越省探测时间。
@@ -270,7 +316,8 @@ class CfOptimizerCoordinator(private val context: Context) {
 
         CfLog.i(
             "run=$runId pool memory=${memoryCandidates.size} lastGood=${lastGoodCandidates.size} " +
-                "fresh=${freshCandidates.size} blocked=${blockedAddresses.size} pooled=${pooled.size}",
+                "fresh=${freshCandidates.size} (scan=${scannedCandidates.size}) " +
+                "blocked=${blockedAddresses.size} pooled=${pooled.size}",
         )
 
         if (pooled.isEmpty()) {
@@ -293,10 +340,23 @@ class CfOptimizerCoordinator(private val context: Context) {
         markStage(STAGE_TCP)
         CfLog.i("run=$runId tcp alive=${tcpAlive.size}/${pooled.size}")
 
-        val allCandidates = tcpAlive.take(maxCandidates + memoryPoolLimit)
+        // 昂贵层截断同样要**给盲扫留名额**：存活集是"记忆 → 上轮 → 源 → 盲扫"的顺序，
+        // 直接 `take()` 会被源候选整段填满（源池实测 ~1400 条，正好等于上限），盲扫一条也进不来 ——
+        // 那等于花 3000 次 TCP connect 买了个没人看的池子。所以按源/盲扫分预算。
+        val expensiveLimit = maxCandidates + memoryPoolLimit
+        val scanAlive = tcpAlive.filter { it.source == CfCidrScan.SOURCE }
+        val aliveScanReserve = if (scanAlive.isEmpty()) 0 else minOf(scanAlive.size, maxCandidates / 2)
+        val nonScanAlive = tcpAlive.filter { it.source != CfCidrScan.SOURCE }
+
+        val nonScan = nonScanAlive.take(expensiveLimit - aliveScanReserve)
+        // 源候选不足时把剩余名额还给盲扫（不让预算空转）
+        val scanTake = minOf(scanAlive.size, expensiveLimit - nonScan.size)
+        val allCandidates = nonScan + scanAlive.take(scanTake)
+
         if (allCandidates.size < tcpAlive.size) {
             CfLog.i(
-                "run=$runId tcp survivors cut ${tcpAlive.size}->${allCandidates.size} (cap=${maxCandidates + memoryPoolLimit})",
+                "run=$runId tcp survivors cut ${tcpAlive.size}->${allCandidates.size} " +
+                    "(cap=$expensiveLimit, aliveScanReserve=$aliveScanReserve, scanTaken=$scanTake)",
             )
         }
 
@@ -387,7 +447,7 @@ class CfOptimizerCoordinator(private val context: Context) {
 
         // maxTtfbMs / maxJitterMs / maxEntries / weights 此前只用了引擎默认值（协调器没传参）──
         // 引擎本来支持，只是没人把用户值递进去：现在一并接上，默认值与旧行为逐字相同。
-        val limits = OptimizerLimits(
+        val baseLimits = OptimizerLimits(
             maxEntries = settingsStore.maxEntries,
             maxTtfbMs = settingsStore.maxTtfbMs.toLong(),
             maxJitterMs = settingsStore.maxJitterMs.toLong(),
@@ -408,20 +468,94 @@ class CfOptimizerCoordinator(private val context: Context) {
             probed
         }
 
-        var ranked = CfOptimizerEngine.rank(rankPool, scoredMetrics, limits)
-        CfLog.i("run=$runId rank in=${rankPool.size} out=${ranked.size} minScore=${limits.minScore}")
+        // 3.2 记忆库置信度（原版 2026-11-11 的 `PUSH_MEMORY_FUSE_W_LOCAL = 0.6`）：
+        //     最终排序 = 0.6×本轮分 + 0.4×历史置信度。单轮 5 秒采样的方差极大（实测同一 IP 跨轮
+        //     0.9/1.0/31.5/0.9 Mbps），纯本轮排序等于让一次采样噪声决定下一轮走哪个入口。
+        //     只对 passes ≥ 2 的节点融合 —— 一次侥幸不算"稳定"。
+        val memoryFusion = memory?.let { store ->
+            val nowSeconds = CfMemoryStore.nowSeconds()
+            val bucket = CfMemoryScoring.hourBucket(nowSeconds, TimeZone.getDefault(), settingsStore.memoryTuning)
+
+            store.snapshot().mapNotNull { (key, record) ->
+                if (record.passes < MEMORY_FUSE_MIN_RUNS) {
+                    null
+                } else {
+                    key to CfMemoryScoring.confidenceOf(record, nowSeconds, bucket, settingsStore.memoryTuning)
+                }
+            }.toMap()
+        }.orEmpty()
+
+        // 3.3 门槛自适应（原版"节点不足就放宽"的收敛版）：严格档不够就先放宽 TTFB/抖动/门槛分，
+        //     都不够时用最宽档；仍然一条都没有才放弃上传。真机 10-26 / 10-31 两轮就是死在这里
+        //     （`ranked` 0 和 1 < gate 6 → 静默不传，Worker 上留着更旧的名单）。
+        var ranked = emptyList<OptimizedEntry>()
+        var relaxTier = 0
+        var gateSatisfied = false
+
+        for (step in CfAdaptiveGate.plan(baseLimits)) {
+            val attempt = CfOptimizerEngine.rank(
+                candidates = rankPool,
+                metrics = scoredMetrics,
+                limits = step.limits,
+                memoryConfidence = memoryFusion,
+                memoryWeight = MEMORY_FUSE_WEIGHT,
+            )
+
+            if (attempt.size >= ranked.size) {
+                ranked = attempt
+                relaxTier = step.tier
+            }
+
+            if (CfAdaptiveGate.satisfied(attempt.size, minUploadEntries)) {
+                ranked = attempt
+                relaxTier = step.tier
+                gateSatisfied = true
+                break
+            }
+
+            CfLog.i(
+                "run=$runId rank tier=${step.tier} out=${attempt.size} < gate=$minUploadEntries, relaxing",
+            )
+        }
+
+        CfLog.i(
+            "run=$runId rank in=${rankPool.size} out=${ranked.size} tier=$relaxTier " +
+                "gate=$minUploadEntries satisfied=$gateSatisfied",
+        )
 
         // 3.5 CIDR 前缀去重（原版 cidr_seen 语义）：同一前缀只保留最高分，
-        //     让 Worker 列表分散在不同网段；去重后不足质量门则不上传。
+        //     让 Worker 列表分散在不同网段。
         val rankedBeforeDedupe = ranked.size
         ranked = dedupeByPrefix(ranked, settingsStore.dedupPrefixV4)
         CfLog.i(
             "run=$runId dedupe prefix=/${settingsStore.dedupPrefixV4} $rankedBeforeDedupe->${ranked.size}",
         )
 
+        // 3.6 合并上一轮已推送的节点（只补**本轮 TCP 实测可达**的；原版是盲合并 14 天文件，
+        //     这里不做盲合并 —— 见 CfEntryMerge 的偏差说明）。目的：本轮只选出 3–7 条时，
+        //     订阅里仍然保留前几天验证过的稳定节点，而不是被一轮抖动整体换掉。
+        if (ranked.isNotEmpty()) {
+            val mergedIn = mergeLastKnownGood(
+                ranked = ranked,
+                lastGoodCandidates = lastGoodCandidates,
+                lastGoodLines = lastGood,
+                tcpAlive = tcpAlive,
+                metrics = scoredMetrics,
+                limits = baseLimits,
+                prefixLength = settingsStore.dedupPrefixV4,
+                maxExtra = minOf(MERGE_EXTRA_MAX, baseLimits.maxEntries / 2),
+            )
+
+            if (mergedIn.size > ranked.size) {
+                CfLog.i("run=$runId merge lastGood +${mergedIn.size - ranked.size} => ${mergedIn.size}")
+            }
+
+            ranked = mergedIn
+        }
+
         // 3.7 记忆库写回（原版 record_result）。放在这里而不是"上传成功后"：
         //     质量门不足 / 上传失败的轮次同样长记忆——失败轮恰恰是记忆库最该记住的。
-        recordMemory(runId, memory, allCandidates, scoredMetrics, ranked)
+        recordMemory(runId, memory, allCandidates, probed, scoredMetrics, ranked)
 
         markStage(STAGE_RANK)
 
@@ -439,11 +573,19 @@ class CfOptimizerCoordinator(private val context: Context) {
         recorder.tcpAlive = tcpAlive.size
         recorder.stageSeconds = stageSeconds.toMap()
 
+        if (ranked.isEmpty()) {
+            CfLog.w("run=$runId abort reason=no_qualified (ranked empty after adaptive relaxations)")
+
+            return Result(allCandidates.size, 0, false, "no_qualified", false, null)
+        }
+
         if (ranked.size < minUploadEntries) {
+            // 原版语义：门槛不足只**告警**，不放弃上传（11-11 16:10 那轮就只推了 1 条）。
+            // 静默跳过上传的代价是 Worker 上留着更旧的名单 —— 用户看到的正是"它不动了/越来越差"。
+            // 真机 10-26 13:29（ranked=0）与 10-31 20:26（ranked=1）就是这条路径。
             CfLog.w(
-                "run=$runId abort reason=below_quality_gate ranked=${ranked.size} < minUploadEntries=$minUploadEntries",
+                "run=$runId below_quality_gate ranked=${ranked.size} < gate=$minUploadEntries, uploading anyway",
             )
-            return Result(allCandidates.size, ranked.size, false, "below_quality_gate", false, null)
         }
 
         // 4. 组装 Worker 列表：用户自定义静态行在前（与原脚本 custom_add.txt 语义一致），
@@ -548,14 +690,21 @@ class CfOptimizerCoordinator(private val context: Context) {
         runId: String,
         memory: CfMemoryStore?,
         candidates: List<CandidateIp>,
+        probed: List<CandidateIp>,
         metrics: Map<CandidateIp, ProbeMetrics>,
         ranked: List<OptimizedEntry>,
     ) {
         if (memory == null) return
 
         val selected = ranked.associateBy { it.address to it.port }
+        val probedSet = probed.toHashSet()
 
         candidates.forEach { candidate ->
+            // 没进 `probed` 的候选是**被地区过滤/被截断**，不是"连不上"。
+            // 旧实现把它们记成 STAGE_FAIL：连续 3 轮就进 blockedAddresses，好节点被自己拉黑 ——
+            // 这是"越跑越差"的一条自伤路径（backlog §43-2 登记过，这里一并修掉）。
+            if (candidate !in probedSet) return@forEach
+
             val entry = selected[candidate.address to candidate.port]
             val measured = metrics[candidate]
             val key = CfMemoryStore.key(candidate.address, candidate.port)
@@ -614,18 +763,70 @@ class CfOptimizerCoordinator(private val context: Context) {
      */
     private fun dedupeByPrefix(ranked: List<OptimizedEntry>, prefixLength: Int): List<OptimizedEntry> {
         val seen = HashSet<String>()
-        val octetsKept = (prefixLength.coerceIn(8, 32) + 7) / 8
 
         return ranked.filter { entry ->
-            val prefix = if (entry.address.contains(':')) {
-                entry.address.split(':').take(IPV6_DEDUP_HEXTETS).joinToString(":")
-            } else {
-                val octets = entry.address.split('.')
-                if (octets.size == 4) octets.take(octetsKept).joinToString(".") else null
-            }
+            val prefix = CfEntryMerge.prefixKey(entry.address, prefixLength)
 
             prefix == null || seen.add(prefix)
         }
+    }
+
+    /**
+     * 把上一轮已推送、且**本轮 TCP 可达**的节点补进本轮名单（详见 [CfEntryMerge]）。
+     *
+     * 两道额外闸门（比"盲合并 14 天旧文件"的原版更保守）：
+     *  - 有本轮指标时：TTFB 超过 [MERGE_MAX_TTFB_MS] 的不要（那是"能连但明显慢"）；
+     *  - 有带宽读数且低于用户带宽下限的不要（0.1 Mbps 的僵尸节点不该因为"以前推过"就复活）。
+     */
+    private fun mergeLastKnownGood(
+        ranked: List<OptimizedEntry>,
+        lastGoodCandidates: List<CandidateIp>,
+        lastGoodLines: List<String>,
+        tcpAlive: List<CandidateIp>,
+        metrics: Map<CandidateIp, ProbeMetrics>,
+        limits: OptimizerLimits,
+        prefixLength: Int,
+        maxExtra: Int,
+    ): List<OptimizedEntry> {
+        if (maxExtra <= 0 || lastGoodCandidates.isEmpty()) return ranked
+
+        val aliveKeys = tcpAlive.map { it.address to it.port }.toHashSet()
+        val regionOf = lastGoodLines.mapNotNull { line ->
+            val parsed = parseWorkerLine(line) ?: return@mapNotNull null
+            val region = line.substringAfterLast('#', "ZZ")
+
+            (parsed.first to parsed.second) to region
+        }.toMap()
+
+        val previous = lastGoodCandidates.mapNotNull { candidate ->
+            if ((candidate.address to candidate.port) !in aliveKeys) return@mapNotNull null
+
+            val measured = metrics[candidate]
+            if (measured != null) {
+                if (measured.ttfbMs > MERGE_MAX_TTFB_MS) return@mapNotNull null
+                if (measured.downloadMbps > 0.0 && measured.downloadMbps < limits.minDownloadMbps) {
+                    return@mapNotNull null
+                }
+            }
+
+            val region = measured?.region ?: regionOf[candidate.address to candidate.port] ?: "ZZ"
+
+            OptimizedEntry(
+                address = candidate.address,
+                port = candidate.port,
+                region = CfOptimizerEngine.normalizeRegion(region),
+                ttfbMs = measured?.ttfbMs ?: 0L,
+                jitterMs = measured?.jitterMs ?: 0L,
+                downloadMbps = measured?.downloadMbps ?: 0.0,
+                score = measured?.let {
+                    CfOptimizerEngine.scoreOf(it, limits.weights, limits.bwRefMbps)
+                } ?: 0.0,
+            )
+        }
+
+        return CfEntryMerge
+            .merge(ranked, previous, maxExtra, prefixLength)
+            .take(limits.maxEntries)
     }
 
     /** 只刷新用户绑定的那一个 URL Profile，走现有 ProfileProcessor 校验/原子替换/重载链。 */
@@ -649,8 +850,17 @@ class CfOptimizerCoordinator(private val context: Context) {
         const val STAGE_UPLOAD: String = "upload"
         const val STAGE_DONE: String = "done"
 
-        /** IPv6 去重前缀段数（原脚本 `IPV6_DEDUP_PREFIX = 48` → 48/16 = 3 段）。 */
-        private const val IPV6_DEDUP_HEXTETS: Int = 3
+        /** 本轮分与记忆置信度的融合权重（原版 `PUSH_MEMORY_FUSE_W_LOCAL = 0.6` → 记忆占 0.4）。 */
+        private const val MEMORY_FUSE_WEIGHT: Double = 0.4
+
+        /** 参与融合排序所需的最小成功轮数（原版 `MEMORY_FUSE_MIN_RUNS`）：一次侥幸不算"稳定"。 */
+        private const val MEMORY_FUSE_MIN_RUNS: Int = 2
+
+        /** 每轮最多从上一轮名单补几条（不超过 `maxEntries/2`）：兜底，不喧宾夺主。 */
+        private const val MERGE_EXTRA_MAX: Int = 4
+
+        /** 合并旧节点时允许的最大 TTFB（毫秒）—— 超过它的旧节点宁可不要。 */
+        private const val MERGE_MAX_TTFB_MS: Long = 1_500
 
     }
 }

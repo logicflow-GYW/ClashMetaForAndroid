@@ -70,6 +70,17 @@ object CfOptimizerEngine {
         candidates: List<CandidateIp>,
         metrics: Map<CandidateIp, ProbeMetrics>,
         limits: OptimizerLimits = OptimizerLimits(),
+        /**
+         * 记忆库置信度（0–100，`address:port` → 置信度）。只有 [memoryWeight] > 0 且该键存在时才参与排序。
+         *
+         * 为什么要有这一项（原版 2026-11-11 的 `PUSH_MEMORY_FUSE_W_LOCAL = 0.6`）：单轮 5 秒测速
+         * 的方差极大（实测同一 IP 跨轮 0.9/1.0/31.5/0.9 Mbps），纯本轮分排序等于让一次采样噪声
+         * 决定下一轮所有用户走哪个入口。原版的解法是最终分 = `0.6×本轮 + 0.4×记忆置信度`，
+         * 本 App 此前只把记忆库用于"挑候选"，排序仍是纯本轮 —— 这条补齐。
+         */
+        memoryConfidence: Map<String, Double> = emptyMap(),
+        /** 记忆分权重（0 = 关闭融合，保持旧行为）。超出 [0,1] 的值按边界夹住，非法值按 0 处理。 */
+        memoryWeight: Double = 0.0,
     ): List<OptimizedEntry> {
         if (candidates.isEmpty()) return emptyList()
         if (limits.maxEntries <= 0) return emptyList()
@@ -112,7 +123,8 @@ object CfOptimizerEngine {
         }
 
         val sorted = best.values.sortedWith(
-            compareByDescending<OptimizedEntry> { it.score }
+            compareByDescending<OptimizedEntry> { fusedScoreOf(it, memoryConfidence, memoryWeight) }
+                .thenByDescending { it.score }
                 .thenBy { it.ttfbMs }
                 .thenBy { it.jitterMs }
                 .thenByDescending { it.downloadMbps }
@@ -139,8 +151,27 @@ object CfOptimizerEngine {
         return (ttfbPart + bwPart) * 100.0
     }
 
-    /** 地区码规范化：两位大写 A–Z；缺失/非法用 "ZZ"。 */
-    fun normalizeRegion(raw: String): String {
+    /**
+     * 排序用的融合分：`(1−w)×本轮分 + w×记忆置信度`。
+     *
+     * - 没有该节点的记忆记录（或记录不可用）→ 直接用本轮分（原版 `get_node_confidence` 返回 None 时同义）；
+     * - [weight] 非法（NaN/负/0）→ 关闭融合；>1 按 1 处理（那时排序完全由记忆决定，仍保证确定性）。
+     */
+    fun fusedScoreOf(
+        entry: OptimizedEntry,
+        memoryConfidence: Map<String, Double>,
+        weight: Double,
+    ): Double {
+        if (!weight.isFinite() || weight <= 0.0 || memoryConfidence.isEmpty()) return entry.score
+
+        val conf = memoryConfidence["${entry.address}:${entry.port}"] ?: return entry.score
+        if (!conf.isFinite()) return entry.score
+
+        val w = weight.coerceAtMost(1.0)
+        return (1.0 - w) * entry.score + w * conf.coerceIn(0.0, 100.0)
+    }
+
+    /** 地区码规范化：两位大写 A–Z；缺失/非法用 "ZZ"。 */    fun normalizeRegion(raw: String): String {
         val s = raw.trim().uppercase()
         return if (s.length == 2 && s.all { it in 'A'..'Z' }) s else REGION_FALLBACK
     }

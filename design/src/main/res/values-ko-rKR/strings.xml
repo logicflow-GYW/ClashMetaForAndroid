@@ -295,6 +295,7 @@
     <string name="cf_optimizer_exclude_countries">제외 국가(쉼표 구분)</string>
     <string name="cf_optimizer_only_countries">허용 국가(비우면 비활성)</string>
     <string name="cf_optimizer_sources_per_run">실행당 소스 수</string>
+    <string name="cf_optimizer_cidr_scan">실행당 CIDR 스캔 수</string>
     <string name="cf_optimizer_per_source_sample">소스당 샘플 수</string>
     <string name="cf_optimizer_max_candidates">후보 한도</string>
     <string name="cf_optimizer_min_upload_entries">업로드 기준</string>

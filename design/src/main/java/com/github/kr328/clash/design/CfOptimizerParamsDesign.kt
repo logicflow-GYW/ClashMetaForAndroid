@@ -80,6 +80,13 @@ class CfOptimizerParamsDesign(
             )
 
             editableText(
+                value = cfSettings::cidrScanCountRaw,
+                adapter = stringAdapter,
+                title = R.string.cf_optimizer_cidr_scan,
+                empty = R.string.cf_optimizer_not_set,
+            )
+
+            editableText(
                 value = cfSettings::maxCandidatesRaw,
                 adapter = stringAdapter,
                 title = R.string.cf_optimizer_max_candidates,

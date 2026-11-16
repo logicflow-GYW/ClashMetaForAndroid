@@ -359,6 +359,7 @@
     <string name="cf_optimizer_exclude_countries">Исключённые страны (через запятую)</string>
     <string name="cf_optimizer_only_countries">Только эти страны (пусто = выкл.)</string>
     <string name="cf_optimizer_sources_per_run">Источников за запуск</string>
+    <string name="cf_optimizer_cidr_scan">Сканирование CIDR за запуск</string>
     <string name="cf_optimizer_per_source_sample">Образцов на источник</string>
     <string name="cf_optimizer_max_candidates">Лимит кандидатов</string>
     <string name="cf_optimizer_min_upload_entries">Порог загрузки</string>

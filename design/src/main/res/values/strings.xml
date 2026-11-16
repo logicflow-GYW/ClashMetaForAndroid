@@ -402,6 +402,7 @@
     <string name="cf_optimizer_exclude_countries">Excluded countries</string>
     <string name="cf_optimizer_only_countries">Only these countries</string>
     <string name="cf_optimizer_sources_per_run">Sources per run</string>
+    <string name="cf_optimizer_cidr_scan">CIDR scan per run</string>
     <string name="cf_optimizer_per_source_sample">Samples per source</string>
     <string name="cf_optimizer_max_candidates">Candidate limit</string>
     <string name="cf_optimizer_min_upload_entries">Upload quality gate</string>

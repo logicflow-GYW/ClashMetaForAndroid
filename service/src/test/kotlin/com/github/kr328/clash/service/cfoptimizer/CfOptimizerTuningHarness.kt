@@ -31,23 +31,23 @@ private fun near(a: Double, b: Double, eps: Double = 1e-9) = kotlin.math.abs(a -
 
 fun runCfOptimizerTuningHarness() {
     // ---- 1. 默认值（字面量；等于移植时的原版/实测值）----
-    check("sourcesPerRun 默认 12", CfOptimizerTuning.sourcesPerRun(null) == 12)
+    check("sourcesPerRun 默认 96（导航站全量，2026-11-16 上调）", CfOptimizerTuning.sourcesPerRun(null) == 96)
     check("perSourceSample 默认 1000", CfOptimizerTuning.perSourceSample(null) == 1000)
     check("maxCandidates 默认 1200", CfOptimizerTuning.maxCandidates(null) == 1200)
-    check("minUploadEntries 默认 6", CfOptimizerTuning.minUploadEntries(null) == 6)
+    check("minUploadEntries 默认 3（对齐原版 SMART_PUSH_MIN_NODES）", CfOptimizerTuning.minUploadEntries(null) == 3)
     check("maxPerRegion 默认 4", CfOptimizerTuning.maxPerRegion(null) == 4)
     check("tcpConcurrency 默认 500", CfOptimizerTuning.tcpConcurrency(null) == 500)
     check("tcpTimeoutMs 默认 900", CfOptimizerTuning.tcpTimeoutMs(null) == 900)
     check("probeConcurrency 默认 50", CfOptimizerTuning.probeConcurrency(null) == 50)
     check("traceConcurrency 默认 100", CfOptimizerTuning.traceConcurrency(null) == 100)
     check("ttfbSamples 默认 3", CfOptimizerTuning.ttfbSamples(null) == 3)
-    check("downloadPoolLimit 默认 60", CfOptimizerTuning.downloadPoolLimit(null) == 60)
+    check("downloadPoolLimit 默认 120（对齐原版 TTFB_POOL_LIMIT）", CfOptimizerTuning.downloadPoolLimit(null) == 120)
     check("downloadConcurrency 默认 8", CfOptimizerTuning.downloadConcurrency(null) == 8)
     check("downloadSizeMb 默认 6", CfOptimizerTuning.downloadSizeMb(null) == 6)
     check("downloadTimeoutMs 默认 5000", CfOptimizerTuning.downloadTimeoutMs(null) == 5000)
     check("downloadEarlyStopMbps 默认 80.0", CfOptimizerTuning.downloadEarlyStopMbps(null) == 80.0)
-    check("minDownloadMbps 默认 1.0", CfOptimizerTuning.minDownloadMbps(null) == 1.0)
-    check("scoreBwRefMbps 默认 50.0", CfOptimizerTuning.scoreBwRefMbps(null) == 50.0)
+    check("minDownloadMbps 默认 2.0（对齐原版 PUSH_MIN_MBPS）", CfOptimizerTuning.minDownloadMbps(null) == 2.0)
+    check("scoreBwRefMbps 默认 40.0（对齐原版 SCORE_MAX_BPS 重标定）", CfOptimizerTuning.scoreBwRefMbps(null) == 40.0)
     check("maxTtfbMs 默认 800", CfOptimizerTuning.maxTtfbMs(null) == 800)
     check("maxJitterMs 默认 200", CfOptimizerTuning.maxJitterMs(null) == 200)
     check("minScore 默认 30.0", CfOptimizerTuning.minScore(null) == 30.0)
@@ -61,6 +61,7 @@ fun runCfOptimizerTuningHarness() {
     check("memoryHourBuckets 默认 4", CfOptimizerTuning.memoryHourBuckets(null) == 4)
     check("memoryPoolLimit 默认 100", CfOptimizerTuning.memoryPoolLimit(null) == 100)
     check("minIntervalHours 默认 6", CfOptimizerTuning.minIntervalHours(null) == 6)
+    check("cidrScanCount 默认 3000", CfOptimizerTuning.cidrScanCount(null) == 3000)
 
     // ---- 2. 空串/空白/非法值 → 回落默认（设置页允许清空，清空 = 恢复默认）----
     check("空串 → 默认", CfOptimizerTuning.tcpConcurrency("") == 500)
@@ -70,7 +71,7 @@ fun runCfOptimizerTuningHarness() {
     check("小数填进整数项 → 默认（不四舍五入）", CfOptimizerTuning.ttfbSamples("3.5") == 3)
     check("NaN → 默认", CfOptimizerTuning.minScore("NaN") == 30.0)
     check("Infinity → 默认", CfOptimizerTuning.downloadEarlyStopMbps("Infinity") == 80.0)
-    check("非法串 → 默认（带宽参考值）", CfOptimizerTuning.scoreBwRefMbps("abc") == 50.0)
+    check("非法串 → 默认（带宽参考值）", CfOptimizerTuning.scoreBwRefMbps("abc") == 40.0)
     check("非法串 → 默认（地区解析并发）", CfOptimizerTuning.traceConcurrency("abc") == 100)
 
     // ---- 3. 范围内照用、越界夹取（不是"推荐区间"）----
@@ -109,7 +110,7 @@ fun runCfOptimizerTuningHarness() {
 
     // ---- 4b. 带宽下限随下载测速开关失效（关测速时全池 downloadMbps 都是 0，
     //          门槛照用会把名单清空 —— 与门槛分折半同一个理由）----
-    check("开测速：默认下限 = 1.0", CfOptimizerTuning.effectiveMinDownloadMbps(null, true) == 1.0)
+    check("开测速：默认下限 = 2.0", CfOptimizerTuning.effectiveMinDownloadMbps(null, true) == 2.0)
     check("开测速：用户填 5 照用", CfOptimizerTuning.effectiveMinDownloadMbps("5", true) == 5.0)
     check("关测速：默认下限 → 0.0", CfOptimizerTuning.effectiveMinDownloadMbps(null, false) == 0.0)
     check("关测速：用户填 5 → 0.0（否则名单全空）",

@@ -24,10 +24,16 @@ object CfOptimizerTuning {
      * 而导航站里多数 .txt 源只有 2–50 行。只抽 8 个源时很容易整套抽到小源，真机一轮实测
      * 原始候选只有 594 条（远低于 8 × 250 的预期）。多抽几个源的边际成本只是每个源一次 HTTP、
      * 几 KB–几十 KB 流量，买到的是"抽到富源"的概率。
+     *
+     * **2026-11-16 上调到 96（导航站全量）**：真机导出数据给出决定性证据 —— 导航站 96 个 `.txt`
+     * 源的**并集只有约 1400 个唯一 IP:port**，随机抽 12 个源的并集中位数 247 条，与 runs.jsonl 里
+     * `candidates_raw` 的 250/252/257/263 逐条对上；同期原版脚本用**全部源 + 3000 条盲扫**凑到
+     * 6794 条。源都很小（全量文本约 400 KB），真正的代价是并发与墙钟，不是流量 ——
+     * 已由 `CfCandidateSource` 的按域名限流承担。上限放到 200 只是给"源变多"留余量。
      */
-    const val SOURCES_PER_RUN_DEFAULT = 12
+    const val SOURCES_PER_RUN_DEFAULT = 96
     const val SOURCES_PER_RUN_MIN = 1
-    const val SOURCES_PER_RUN_MAX = 24
+    const val SOURCES_PER_RUN_MAX = 200
 
     /**
      * 单源抽样条数 —— 原版 `sample_limit`（1000/3000）。
@@ -39,6 +45,21 @@ object CfOptimizerTuning {
     const val PER_SOURCE_SAMPLE_DEFAULT = 1_000
     const val PER_SOURCE_SAMPLE_MIN = 1
     const val PER_SOURCE_SAMPLE_MAX = 3_000
+
+    /**
+     * 每轮从 CF 官方网段**盲扫**的地址数 —— 原版 `RANDOM_SCAN_COUNT = 15000`（静态源 >1000 时取 20%，即 3000）。
+     *
+     * 这是"探索面"的另一半：公开 .txt 源是所有人共用的同一批地址（实测并集仅约 1400），只吃源就等于
+     * 永远在别人已经公开过的地址里挑。原版每轮 6794 条候选里约 3000 条来自盲扫 —— 差别不在评分，
+     * 在"有没有新地址可测"。
+     *
+     * 代价：一条候选在便宜层只付一次 TCP connect（900ms、500 并发），3000 条约 6–10 秒墙钟；
+     * 昂贵层仍由 [MAX_CANDIDATES_DEFAULT] 与原始池倍数封顶，不会因为盲扫把 TTFB 段撑爆。
+     * 0 = 关闭盲扫（回到只吃公开源的行为）。
+     */
+    const val CIDR_SCAN_COUNT_DEFAULT = 3_000
+    const val CIDR_SCAN_COUNT_MIN = 0
+    const val CIDR_SCAN_COUNT_MAX = 20_000
 
     /**
      * 每轮进入 TTFB 探测的候选上限（**昂贵层**）—— 默认 1200（原版：全部存活集都探，实测一轮探过 1250）。
@@ -54,8 +75,15 @@ object CfOptimizerTuning {
     const val MAX_CANDIDATES_MIN = 1
     const val MAX_CANDIDATES_MAX = 20_000
 
-    /** 上传质量门 —— 原版 `SMART_PUSH_MIN_NODES`（3；原版真机一轮推了 8 个）。默认 6。 */
-    const val MIN_UPLOAD_ENTRIES_DEFAULT = 6
+    /**
+     * 上传质量门 —— 原版 `SMART_PUSH_MIN_NODES`（3；原版真机一轮推了 8 个，但也推过 1 个）。
+     *
+     * 2026-11-16 由 6 降到 3 并对齐原版语义：**门槛是"要不要报警"，不是"要不要上传"**。
+     * 低于门槛时 [com.github.kr328.clash.service.cfoptimizer.CfAdaptiveGate] 会先放宽一轮门槛，
+     * 仍不足则带着告警上传（原版 11-11 16:10 那轮就只推了 1 条）—— 但绝不静默跳过，
+     * 否则 Worker 上留着的是更旧的名单（真机 10-26 / 10-31 各发生过一次）。
+     */
+    const val MIN_UPLOAD_ENTRIES_DEFAULT = 3
     const val MIN_UPLOAD_ENTRIES_MIN = 1
     const val MIN_UPLOAD_ENTRIES_MAX = 100
 
@@ -120,12 +148,16 @@ object CfOptimizerTuning {
     /**
      * 进测速的窄池大小 —— 原版 `BW_TOP_N`（4，测速前 N 个）/ `TTFB_POOL_LIMIT`（120，池闸门，实测 80→76）。
      *
-     * 默认 60（原版池闸门 120，实测 13–120）：池子只按 TTFB 排序取前 N 个，
+     * 默认 120（原版池闸门 120，实测 13–120）：池子只按 TTFB 排序取前 N 个，
      *     池子越大，"TTFB 快但带宽差"的节点越不容易把真正快的节点挤出测速名单。
-     *     流量 = 池 × 单节点下载量 × 早停削减；60 × 6 MiB = 最坏 360 MB，典型一轮 40–80 MB。
+     *
+     *     2026-11-16 由 60 上调到 120：真机 11-16 那轮 78 条带宽读数里，24–31 Mbps 的节点全在
+     *     TTFB 500–810ms 区间，只进得了"扩大后的"测速池 —— 60 的池子让这类节点在测速前就被
+     *     挤掉，最终名单中位带宽 3.9 Mbps。流量 = 池 × 单节点下载量 × 早停削减；
+     *     120 × 6 MiB = 最坏 720 MB，典型一轮 80–160 MB（早停在 80 Mbps，移动链路基本不会到）。
      *     流量敏感用户可把这个值调小，或直接关掉下载测速。
      */
-    const val DOWNLOAD_POOL_LIMIT_DEFAULT = 60
+    const val DOWNLOAD_POOL_LIMIT_DEFAULT = 120
     const val DOWNLOAD_POOL_LIMIT_MIN = 1
     const val DOWNLOAD_POOL_LIMIT_MAX = 200
 
@@ -212,10 +244,14 @@ object CfOptimizerTuning {
      * 在 10–30 Mbps 的移动链路上 `mbps/150` 只有 0.07–0.2 —— 带宽项满打满算贡献 2.7–8 分，
      * 而 TTFB 每差 100ms 就是 7.5 分。结果就是**排序实际上只按 TTFB**：真机一轮选出的 6 条
      * TTFB 159–300ms 很好、带宽却只有 0.31–12 Mbps，同源同机的原版 1250 个候选选出的是 5.2–28.5 Mbps。
-     * 50 让带宽项在自己的链路上真正有区分度（10 Mbps → 8 分，30 Mbps → 24 分）。
-     * **调法**：设成"自己链路实测带宽的 1–2 倍"；链路很快（>200 Mbps）时可以调回 150 恢复原版口径。
+     *
+     * **2026-11-16 由 50 调到 40**，对齐原版 11-11 的重标定（`SCORE_MAX_BPS` 150→40）：用 App 自己
+     * 11-16 那轮的 78 条实测离线重放，50 口径下 `47.99.164.61`（31.2 Mbps / 780ms）只有 26.5 分、
+     * 被 30 分门槛拦下；40 口径下 32.7 分入选。40 让"6 倍带宽换 240ms 延迟"在评分上基本等价，
+     * 而 50 会让 240ms 的延迟差完胜。**调法**：设成"自己链路实测带宽的 1–2 倍"；
+     * 链路很快（>200 Mbps）时可以调回 150 恢复原版口径。
      */
-    const val SCORE_BW_REF_MBPS_DEFAULT = 50.0
+    const val SCORE_BW_REF_MBPS_DEFAULT = 40.0
     const val SCORE_BW_REF_MBPS_MIN = 1.0
     const val SCORE_BW_REF_MBPS_MAX = 1_000.0
 
@@ -224,10 +260,13 @@ object CfOptimizerTuning {
      *
      * 原版没有这一条，但原版的最终名单是 `final = select(bw_results)` —— **只从测速成功的集合里挑**，
      * 而我们是"测速失败/极慢也留在池子里"。实测后果：一条 0.307 Mbps 的节点拿 48.2 分入选
-     * （TTFB 项单独就给 60 分里的大头）。默认 1.0 Mbps：低于它实际不可用，不如把名额留给别的地区。
-     * 0 = 不启用（回到旧行为）。
+     * （TTFB 项单独就给 60 分里的大头）。
+     *
+     * **2026-11-16 由 1.0 调到 2.0**，对齐原版 11-11 的 `PUSH_MIN_MBPS = 2.0`：真机 11-16 那轮
+     * `177.3.89.196`（JP，**0.1 Mbps**）拿 36.6 分，只因 JP 的 4 条地区配额已满才没被推上去 ——
+     * 换一轮配额没满，它就会进订阅。0 = 不启用（回到旧行为）。
      */
-    const val MIN_DOWNLOAD_MBPS_DEFAULT = 1.0
+    const val MIN_DOWNLOAD_MBPS_DEFAULT = 2.0
     const val MIN_DOWNLOAD_MBPS_MIN = 0.0
     const val MIN_DOWNLOAD_MBPS_MAX = 100.0
 
@@ -283,6 +322,9 @@ object CfOptimizerTuning {
 
     fun perSourceSample(raw: String?): Int =
         intOf(raw, PER_SOURCE_SAMPLE_DEFAULT, PER_SOURCE_SAMPLE_MIN, PER_SOURCE_SAMPLE_MAX)
+
+    fun cidrScanCount(raw: String?): Int =
+        intOf(raw, CIDR_SCAN_COUNT_DEFAULT, CIDR_SCAN_COUNT_MIN, CIDR_SCAN_COUNT_MAX)
 
     fun maxCandidates(raw: String?): Int =
         intOf(raw, MAX_CANDIDATES_DEFAULT, MAX_CANDIDATES_MIN, MAX_CANDIDATES_MAX)
